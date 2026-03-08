@@ -6,6 +6,7 @@ import { NewTokensPanel } from "@/components/dashboard/NewTokensPanel";
 import { TrendingPanel } from "@/components/dashboard/TrendingPanel";
 import { SignalsPanel } from "@/components/dashboard/SignalsPanel";
 import { WalletTrackerPanel } from "@/components/dashboard/WalletTrackerPanel";
+import { WalletPanel } from "@/components/dashboard/WalletPanel";
 
 const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -16,7 +17,7 @@ const Index = () => {
       <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} />
       <StatsBar />
 
-      <div className="flex-1 grid grid-cols-4 gap-4 px-6 pb-6 min-h-0">
+      <div className="flex-1 grid grid-cols-5 gap-4 px-6 pb-6 min-h-0">
         {/* New Tokens */}
         <div className="flex flex-col rounded-xl bg-card border border-border p-4 overflow-hidden">
           <NewTokensPanel />
@@ -35,6 +36,11 @@ const Index = () => {
         {/* Wallet Tracker */}
         <div className="flex flex-col rounded-xl bg-card border border-border p-4 overflow-hidden">
           <WalletTrackerPanel />
+        </div>
+
+        {/* User Wallet & Trading */}
+        <div className="flex flex-col rounded-xl bg-card border border-border p-4 overflow-hidden">
+          <WalletPanel />
         </div>
       </div>
     </div>

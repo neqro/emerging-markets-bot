@@ -4,10 +4,11 @@ interface PanelHeaderProps {
   title: string;
   icon: LucideIcon;
   count?: number;
+  badge?: string;
   accent?: "primary" | "accent" | "destructive";
 }
 
-export const PanelHeader = ({ title, icon: Icon, count, accent = "primary" }: PanelHeaderProps) => {
+export const PanelHeader = ({ title, icon: Icon, count, badge, accent = "primary" }: PanelHeaderProps) => {
   const accentColors = {
     primary: "text-primary bg-primary/10",
     accent: "text-accent bg-accent/10",

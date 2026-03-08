@@ -1,0 +1,19 @@
+{
+  "accountAssociation": {
+    "header": "",
+    "payload": "",
+    "signature": ""
+  },
+  "frame": {
+    "version": "1",
+    "name": "Auto Solana Bot",
+    "iconUrl": "https://emerging-markets-bot.lovable.app/favicon.ico",
+    "homeUrl": "https://emerging-markets-bot.lovable.app",
+    "imageUrl": "https://emerging-markets-bot.lovable.app/og-image.png",
+    "screenshotUrls": [],
+    "tags": ["solana", "trading", "bot", "defi", "signals"],
+    "primaryCategory": "finance",
+    "subtitle": "Autonomous Solana Trading Terminal",
+    "description": "Track new tokens, whale wallets, and AI-powered trading signals in real-time."
+  }
+}

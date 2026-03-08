@@ -310,18 +310,18 @@ serve(async (req) => {
         // Import the private key for signing
         const privateKey = await crypto.subtle.importKey(
           "pkcs8",
-          secretKeyBytes,
+          secretKeyBytes.buffer,
           "Ed25519",
           false,
           ["sign"]
-        );
+        ) as CryptoKey;
 
         // Decode the swap transaction
         const swapTransactionBuf = base64Decode(swapData.swapTransaction);
         
         // Sign the transaction
         const signature = await crypto.subtle.sign("Ed25519", privateKey, swapTransactionBuf);
-        const signatureBase64 = base64Encode(new Uint8Array(signature));
+        const signatureBase64 = base64Encode(new Uint8Array(signature as ArrayBuffer));
 
         // Send the signed transaction via Helius
         const heliusKey = Deno.env.get('HELIUS_API_KEY');

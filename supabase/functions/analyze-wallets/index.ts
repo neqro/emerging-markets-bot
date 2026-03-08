@@ -180,20 +180,28 @@ async function checkWhaleInterest(
   };
 }
 
-// DexScreener'dan yeni Solana token'larını al
+// DexScreener'dan yeni + trending Solana token'larını al
 async function getNewSolanaTokens(): Promise<string[]> {
+  const tokens = new Set<string>();
   try {
-    const res = await fetch('https://api.dexscreener.com/token-profiles/latest/v1');
-    const profiles = await res.json();
+    // Yeni token profilleri
+    const [newRes, trendRes] = await Promise.all([
+      fetch('https://api.dexscreener.com/token-profiles/latest/v1'),
+      fetch('https://api.dexscreener.com/token-boosts/top/v1'),
+    ]);
+    const newProfiles = await newRes.json();
+    const trendProfiles = await trendRes.json();
     
-    return profiles
-      .filter((p: any) => p.chainId === 'solana')
-      .slice(0, 15)
-      .map((p: any) => p.tokenAddress);
+    for (const p of (newProfiles || []).filter((p: any) => p.chainId === 'solana').slice(0, 15)) {
+      tokens.add(p.tokenAddress);
+    }
+    for (const p of (trendProfiles || []).filter((p: any) => p.chainId === 'solana').slice(0, 10)) {
+      tokens.add(p.tokenAddress);
+    }
   } catch (error) {
-    console.error('Error fetching new tokens:', error);
-    return [];
+    console.error('Error fetching tokens:', error);
   }
+  return [...tokens];
 }
 
 // DexScreener'dan token bilgisi al
@@ -217,15 +225,22 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const body = await req.json();
-    const { action } = body;
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action || 'auto-scan';
 
     // ===== OTOMATİK TARAMA =====
     if (action === 'auto-scan') {
       console.log('🔍 Otomatik tarama başlatılıyor...');
       
+      // Eski sinyalleri deaktive et (30 dk'dan eski)
+      await supabase
+        .from('bot_signals')
+        .update({ is_active: false })
+        .eq('is_active', true)
+        .lt('created_at', new Date(Date.now() - 30 * 60000).toISOString());
+      
       const tokenAddresses = await getNewSolanaTokens();
-      console.log(`📋 ${tokenAddresses.length} yeni token bulundu`);
+      console.log(`📋 ${tokenAddresses.length} token bulundu`);
       
       const results = [];
       
@@ -236,7 +251,7 @@ serve(async (req) => {
             .from('token_analysis')
             .select('id')
             .eq('token_address', tokenAddress)
-            .gte('analyzed_at', new Date(Date.now() - 3600000).toISOString()) // son 1 saat
+            .gte('analyzed_at', new Date(Date.now() - 15 * 60000).toISOString()) // son 15 dakika
             .limit(1);
           
           if (existing && existing.length > 0) {

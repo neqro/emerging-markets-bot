@@ -53,7 +53,7 @@ export const WalletPanel = () => {
         ) : !wallet ? (
           <div className="flex flex-col items-center justify-center py-8 space-y-3">
             <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center glow-primary">
-              <Wallet className="h-6 w-6 text-primary" />
+              <WalletIcon className="h-6 w-6 text-primary" />
             </div>
             <p className="text-xs text-muted-foreground text-center">
               Dahili cüzdan oluştur ve<br />SOL yatırarak trade'e başla

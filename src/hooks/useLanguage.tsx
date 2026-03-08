@@ -133,6 +133,13 @@ const translations = {
   "exportKey.copied": { tr: "Private key kopyalandı!", en: "Private key copied!" },
   "exportKey.closeWarning": { tr: "Bu pencereyi kapattıktan sonra key tekrar gösterilmeyecek", en: "The key won't be shown again after closing this window" },
 
+  // Favorites
+  "favorites.title": { tr: "Favoriler", en: "Favorites" },
+  "favorites.empty": { tr: "Henüz favori yok", en: "No favorites yet" },
+  "favorites.emptyDesc": { tr: "Token ve wallet kartlarındaki ⭐ butonuna tıklayarak favori ekle", en: "Tap the ⭐ button on token and wallet cards to add favorites" },
+  "favorites.tokens": { tr: "Tokenler", en: "Tokens" },
+  "favorites.wallets": { tr: "Cüzdanlar", en: "Wallets" },
+
   // Common
   "common.loading": { tr: "Yükleniyor...", en: "Loading..." },
   "common.save": { tr: "Kaydet", en: "Save" },

@@ -14,6 +14,63 @@ export type Database = {
   }
   public: {
     Tables: {
+      auto_trade_settings: {
+        Row: {
+          auto_buy_enabled: boolean
+          auto_sell_enabled: boolean
+          created_at: string
+          daily_reset_at: string
+          daily_sol_used: number
+          id: string
+          is_enabled: boolean
+          max_daily_sol: number
+          max_open_positions: number
+          max_sol_per_trade: number
+          min_confidence_buy: number
+          min_confidence_sell: number
+          stop_loss_percent: number
+          take_profit_percent: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auto_buy_enabled?: boolean
+          auto_sell_enabled?: boolean
+          created_at?: string
+          daily_reset_at?: string
+          daily_sol_used?: number
+          id?: string
+          is_enabled?: boolean
+          max_daily_sol?: number
+          max_open_positions?: number
+          max_sol_per_trade?: number
+          min_confidence_buy?: number
+          min_confidence_sell?: number
+          stop_loss_percent?: number
+          take_profit_percent?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auto_buy_enabled?: boolean
+          auto_sell_enabled?: boolean
+          created_at?: string
+          daily_reset_at?: string
+          daily_sol_used?: number
+          id?: string
+          is_enabled?: boolean
+          max_daily_sol?: number
+          max_open_positions?: number
+          max_sol_per_trade?: number
+          min_confidence_buy?: number
+          min_confidence_sell?: number
+          stop_loss_percent?: number
+          take_profit_percent?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       bot_signals: {
         Row: {
           bot_activity_score: number | null

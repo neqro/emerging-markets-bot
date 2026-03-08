@@ -1,6 +1,6 @@
 // DexScreener public API for Base chain
 const BASE_URL = "https://api.dexscreener.com";
-const BASE_CHAIN = "base";
+const BASE_CHAIN = "solana";
 
 export interface TokenPair {
   chainId: string;

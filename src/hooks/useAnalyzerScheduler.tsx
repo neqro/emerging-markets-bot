@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useAuth } from "./useAuth";
 
-const SCAN_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const SCAN_INTERVAL = 30 * 1000; // 30 seconds
 
 export const useAnalyzerScheduler = () => {
   const { session } = useAuth();
@@ -12,7 +12,7 @@ export const useAnalyzerScheduler = () => {
     if (!session?.access_token) return;
     const now = Date.now();
     // Prevent double-runs within 60s
-    if (now - lastRunRef.current < 60000) return;
+    if (now - lastRunRef.current < 25000) return;
     lastRunRef.current = now;
 
     try {

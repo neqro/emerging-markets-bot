@@ -51,7 +51,7 @@ const Index = () => {
       </div>
 
       {/* Desktop: 7-col grid */}
-      <div className="hidden lg:grid flex-1 grid-cols-7 gap-3 px-4 pb-4 min-h-0">
+      <div className="hidden lg:grid flex-1 grid-cols-6 gap-3 px-4 pb-4 min-h-0">
         <div className="flex flex-col rounded-xl bg-card border border-border p-3 overflow-hidden">
           <NewTokensPanel />
         </div>
@@ -65,13 +65,15 @@ const Index = () => {
           <FavoritesPanel />
         </div>
         <div className="flex flex-col rounded-xl bg-card border border-border p-3 overflow-hidden">
-          <WalletTrackerPanel />
-        </div>
-        <div className="flex flex-col rounded-xl bg-card border border-border p-3 overflow-hidden">
           <PositionsPanel />
         </div>
-        <div className="flex flex-col rounded-xl bg-card border border-border p-3 overflow-hidden">
-          <WalletPanel />
+        <div className="flex flex-col rounded-xl bg-card border border-border p-3 overflow-hidden space-y-3">
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <WalletPanel />
+          </div>
+          <div className="border-t border-border pt-3 flex-1 overflow-hidden flex flex-col">
+            <WalletTrackerPanel />
+          </div>
         </div>
       </div>
 

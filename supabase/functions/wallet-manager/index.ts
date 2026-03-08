@@ -27,24 +27,7 @@ function decryptKey(encryptedBase64: string, secret: string): Uint8Array {
   return decrypted;
 }
 
-// Generate Solana keypair using Ed25519
-async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
-  const keyPair = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
-  
-  const publicKeyRaw = await crypto.subtle.exportKey("raw", keyPair.publicKey);
-  const privateKeyPkcs8 = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
-  
-  // Solana uses base58 for public keys
-  const publicKeyBytes = new Uint8Array(publicKeyRaw);
-  const publicKeyBase58 = base58Encode(publicKeyBytes);
-  
-  // Store the full PKCS8 private key
-  const secretKeyBytes = new Uint8Array(privateKeyPkcs8);
-  
-  return { publicKey: publicKeyBase58, secretKey: secretKeyBytes };
-}
-
-// Base58 encoding (Solana standard)
+// Base58 encoding/decoding (Solana standard)
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function base58Encode(bytes: Uint8Array): string {
   const digits = [0];
@@ -69,6 +52,28 @@ function base58Encode(bytes: Uint8Array): string {
     result += BASE58_ALPHABET[digits[i]];
   }
   return result;
+}
+
+function base58Decode(str: string): Uint8Array {
+  const digits = [0];
+  for (const char of str) {
+    let carry = BASE58_ALPHABET.indexOf(char);
+    if (carry === -1) throw new Error('Invalid base58 character');
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] * 58;
+      digits[j] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      digits.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  const result = new Uint8Array(digits);
+  for (let i = 0; i < str.length && str[i] === '1'; i++) {
+    result[i] = 0;
+  }
+  return result.reverse();
 }
 
 serve(async (req) => {
@@ -103,40 +108,6 @@ serve(async (req) => {
     const body = await req.json();
     const { action } = body;
 
-    // ===== CREATE WALLET =====
-    if (action === 'create-wallet') {
-      // Check if user already has a wallet
-      const { data: existing } = await supabase
-        .from('user_wallets')
-        .select('id, public_key, sol_balance')
-        .eq('user_id', user.id)
-        .single();
-
-      if (existing) {
-        return new Response(JSON.stringify({
-          success: true,
-          wallet: { publicKey: existing.public_key, balance: existing.sol_balance },
-          message: 'Wallet already exists',
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-
-      const { publicKey, secretKey } = await generateSolanaKeypair();
-      const encryptedKey = encryptKey(secretKey, encryptionSecret);
-
-      await supabase.from('user_wallets').insert({
-        user_id: user.id,
-        public_key: publicKey,
-        encrypted_private_key: encryptedKey,
-        sol_balance: 0,
-      });
-
-      return new Response(JSON.stringify({
-        success: true,
-        wallet: { publicKey, balance: 0 },
-        message: 'Wallet created! Deposit SOL to start trading.',
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
     // ===== GET WALLET =====
     if (action === 'get-wallet') {
       const { data: wallet } = await supabase
@@ -151,223 +122,15 @@ serve(async (req) => {
         });
       }
 
-      // Check on-chain balance via Helius
-      const heliusKey = Deno.env.get('HELIUS_API_KEY');
-      let onChainBalance = wallet.sol_balance;
-      
-      if (heliusKey) {
-        try {
-          const balRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0', id: 1,
-              method: 'getBalance',
-              params: [wallet.public_key],
-            }),
-          });
-          const balData = await balRes.json();
-          if (balData.result?.value !== undefined) {
-            onChainBalance = balData.result.value / 1e9; // lamports to SOL
-            // Update DB balance
-            await supabase
-              .from('user_wallets')
-              .update({ sol_balance: onChainBalance })
-              .eq('id', wallet.id);
-          }
-        } catch (e) {
-          console.error('Balance check error:', e);
-        }
-      }
-
       return new Response(JSON.stringify({
         success: true,
         wallet: {
           id: wallet.id,
           publicKey: wallet.public_key,
-          balance: onChainBalance,
+          balance: wallet.sol_balance,
           createdAt: wallet.created_at,
         },
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // ===== EXECUTE TRADE =====
-    if (action === 'execute-trade') {
-      const { tokenAddress, tokenSymbol, orderType, amountSol } = body;
-      
-      if (!tokenAddress || !orderType || !amountSol) {
-        return new Response(JSON.stringify({ error: 'Missing required fields' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      if (amountSol <= 0 || amountSol > 100) {
-        return new Response(JSON.stringify({ error: 'Invalid amount (0.001 - 100 SOL)' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Get user wallet
-      const { data: wallet } = await supabase
-        .from('user_wallets')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      if (!wallet) {
-        return new Response(JSON.stringify({ error: 'No wallet found. Create one first.' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      if (orderType === 'buy' && wallet.sol_balance < amountSol) {
-        return new Response(JSON.stringify({ error: `Insufficient balance. You have ${wallet.sol_balance} SOL.` }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Create order record
-      const { data: order, error: orderError } = await supabase
-        .from('trade_orders')
-        .insert({
-          user_id: user.id,
-          wallet_id: wallet.id,
-          token_address: tokenAddress,
-          token_symbol: tokenSymbol || null,
-          order_type: orderType,
-          amount_sol: amountSol,
-          status: 'executing',
-        })
-        .select()
-        .single();
-
-      if (orderError) {
-        return new Response(JSON.stringify({ error: 'Failed to create order' }), {
-          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Execute swap via Jupiter
-      try {
-        const SOL_MINT = 'So11111111111111111111111111111111111111112';
-        const inputMint = orderType === 'buy' ? SOL_MINT : tokenAddress;
-        const outputMint = orderType === 'buy' ? tokenAddress : SOL_MINT;
-        const amountLamports = Math.floor(amountSol * 1e9);
-
-        // Get Jupiter quote
-        const quoteRes = await fetch(
-          `https://quote-api.jup.ag/v6/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=300`
-        );
-        const quote = await quoteRes.json();
-
-        if (quote.error) {
-          throw new Error(quote.error);
-        }
-
-        // Get swap transaction
-        const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            quoteResponse: quote,
-            userPublicKey: wallet.public_key,
-            wrapAndUnwrapSol: true,
-            dynamicComputeUnitLimit: true,
-            prioritizationFeeLamports: 'auto',
-          }),
-        });
-        const swapData = await swapRes.json();
-
-        if (swapData.error) {
-          throw new Error(swapData.error);
-        }
-
-        // Decrypt private key and sign transaction
-        const secretKeyBytes = decryptKey(wallet.encrypted_private_key, encryptionSecret);
-        
-        // Import the private key for signing
-        const privateKey = await crypto.subtle.importKey(
-          "pkcs8",
-          secretKeyBytes,
-          "Ed25519",
-          false,
-          ["sign"]
-        );
-
-        // Decode the swap transaction
-        const swapTransactionBuf = base64Decode(swapData.swapTransaction);
-        
-        // Sign the transaction
-        const signature = await crypto.subtle.sign("Ed25519", privateKey, swapTransactionBuf);
-        const signatureBase64 = base64Encode(new Uint8Array(signature));
-
-        // Send the signed transaction via Helius
-        const heliusKey = Deno.env.get('HELIUS_API_KEY');
-        const sendRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: 'sendTransaction',
-            params: [swapData.swapTransaction, { encoding: 'base64' }],
-          }),
-        });
-        const sendData = await sendRes.json();
-
-        if (sendData.error) {
-          throw new Error(sendData.error.message || 'Transaction failed');
-        }
-
-        const txSignature = sendData.result;
-
-        // Update order as completed
-        await supabase
-          .from('trade_orders')
-          .update({
-            status: 'completed',
-            tx_signature: txSignature,
-            price_at_trade: quote.outAmount ? Number(quote.outAmount) / 1e9 : null,
-          })
-          .eq('id', order.id);
-
-        // Update balance
-        const newBalance = orderType === 'buy' 
-          ? wallet.sol_balance - amountSol 
-          : wallet.sol_balance + amountSol;
-        await supabase
-          .from('user_wallets')
-          .update({ sol_balance: Math.max(0, newBalance) })
-          .eq('id', wallet.id);
-
-        return new Response(JSON.stringify({
-          success: true,
-          order: {
-            id: order.id,
-            txSignature,
-            status: 'completed',
-            orderType,
-            amountSol,
-            tokenAddress,
-          },
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-
-      } catch (tradeError) {
-        // Update order as failed
-        await supabase
-          .from('trade_orders')
-          .update({
-            status: 'failed',
-            error_message: String(tradeError),
-          })
-          .eq('id', order.id);
-
-        return new Response(JSON.stringify({
-          success: false,
-          error: `Trade failed: ${tradeError}`,
-          orderId: order.id,
-        }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
     }
 
     // ===== GET TRADE HISTORY =====
@@ -384,206 +147,17 @@ serve(async (req) => {
       });
     }
 
-    // ===== WITHDRAW SOL =====
-    if (action === 'withdraw') {
-      const { destinationAddress, amountSol } = body;
-      
-      if (!destinationAddress || !amountSol) {
-        return new Response(JSON.stringify({ error: 'Missing destination address or amount' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      if (amountSol <= 0 || amountSol > 1000) {
-        return new Response(JSON.stringify({ error: 'Invalid amount' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Validate destination address (basic base58 check)
-      if (destinationAddress.length < 32 || destinationAddress.length > 44) {
-        return new Response(JSON.stringify({ error: 'Invalid Solana address' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      const { data: wallet } = await supabase
-        .from('user_wallets')
-        .select('*')
-        .eq('user_id', user.id)
-        .single();
-
-      if (!wallet) {
-        return new Response(JSON.stringify({ error: 'No wallet found' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      if (wallet.sol_balance < amountSol) {
-        return new Response(JSON.stringify({ error: `Insufficient balance. You have ${wallet.sol_balance} SOL.` }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      try {
-        const secretKeyBytes = decryptKey(wallet.encrypted_private_key, encryptionSecret);
-        const privateKey = await crypto.subtle.importKey("pkcs8", secretKeyBytes, "Ed25519", false, ["sign"]);
-        
-        const heliusKey = Deno.env.get('HELIUS_API_KEY');
-        const amountLamports = Math.floor(amountSol * 1e9);
-
-        // Get recent blockhash
-        const bhRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0', id: 1,
-            method: 'getLatestBlockhash',
-            params: [{ commitment: 'finalized' }],
-          }),
-        });
-        const bhData = await bhRes.json();
-        const recentBlockhash = bhData.result?.value?.blockhash;
-
-        if (!recentBlockhash) {
-          throw new Error('Failed to get recent blockhash');
-        }
-
-        // Build a simple SOL transfer transaction manually
-        // System Program Transfer instruction
-        const fromPubkeyBytes = base58Decode(wallet.public_key);
-        const toPubkeyBytes = base58Decode(destinationAddress);
-        
-        // For now, use Helius sendTransaction with a constructed transfer
-        // We'll use the RPC method to create and send transfer
-        const transferRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0', id: 1,
-            method: 'getMinimumBalanceForRentExemption',
-            params: [0],
-          }),
-        });
-        const rentData = await transferRes.json();
-
-        // Use a simple approach: create the transaction via a helper
-        // Since raw transaction building is complex, we'll mark this as pending
-        // and update the balance optimistically
-        
-        // Record the withdrawal
-        const { data: order } = await supabase
-          .from('trade_orders')
-          .insert({
-            user_id: user.id,
-            wallet_id: wallet.id,
-            token_address: destinationAddress,
-            token_symbol: 'SOL_WITHDRAW',
-            order_type: 'withdraw',
-            amount_sol: amountSol,
-            status: 'completed',
-          })
-          .select()
-          .single();
-
-        // Update balance
-        await supabase
-          .from('user_wallets')
-          .update({ sol_balance: Math.max(0, wallet.sol_balance - amountSol) })
-          .eq('id', wallet.id);
-
-        return new Response(JSON.stringify({
-          success: true,
-          message: `Withdrawal of ${amountSol} SOL to ${destinationAddress} initiated.`,
-          orderId: order?.id,
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-
-      } catch (e) {
-        return new Response(JSON.stringify({ error: `Withdrawal failed: ${e}` }), {
-          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-    }
-
-    // ===== EXPORT PRIVATE KEY (requires password verification) =====
-    if (action === 'export-key') {
-      const { password } = body;
-      
-      if (!password) {
-        return new Response(JSON.stringify({ error: 'Password required' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Verify password by attempting sign-in
-      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
-      const verifyClient = createClient(supabaseUrl, anonKey);
-      const { error: verifyError } = await verifyClient.auth.signInWithPassword({
-        email: user.email!,
-        password,
-      });
-
-      if (verifyError) {
-        return new Response(JSON.stringify({ error: 'Invalid password' }), {
-          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Get wallet and decrypt private key
-      const { data: wallet } = await supabase
-        .from('user_wallets')
-        .select('encrypted_private_key, public_key')
-        .eq('user_id', user.id)
-        .single();
-
-      if (!wallet) {
-        return new Response(JSON.stringify({ error: 'No wallet found' }), {
-          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      const secretKeyBytes = decryptKey(wallet.encrypted_private_key, encryptionSecret);
-      const privateKeyBase64 = base64Encode(secretKeyBytes);
-
-      return new Response(JSON.stringify({
-        success: true,
-        privateKey: privateKeyBase64,
-        publicKey: wallet.public_key,
-        warning: 'Never share your private key with anyone!',
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // ===== DELETE ACCOUNT =====
-    if (action === 'delete-account') {
-      try {
-        // Delete user's wallet data
-        await supabase.from('trade_orders').delete().eq('user_id', user.id);
-        await supabase.from('auto_trade_settings').delete().eq('user_id', user.id);
-        await supabase.from('user_wallets').delete().eq('user_id', user.id);
-        await supabase.from('login_history').delete().eq('user_id', user.id);
-
-        // Delete the auth user
-        const { error: deleteError } = await supabase.auth.admin.deleteUser(user.id);
-        if (deleteError) throw deleteError;
-
-        return new Response(JSON.stringify({ success: true, message: 'Account deleted' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      } catch (e) {
-        return new Response(JSON.stringify({ error: `Account deletion failed: ${e}` }), {
-          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-    }
-
     return new Response(JSON.stringify({ error: 'Invalid action' }), {
-      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
-  } catch (error) {
-    console.error('Wallet manager error:', error);
-    return new Response(JSON.stringify({ error: String(error) }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  } catch (error: unknown) {
+    console.error('Error:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });

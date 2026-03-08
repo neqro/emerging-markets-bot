@@ -251,7 +251,7 @@ serve(async (req) => {
             .from('token_analysis')
             .select('id')
             .eq('token_address', tokenAddress)
-            .gte('analyzed_at', new Date(Date.now() - 3600000).toISOString()) // son 1 saat
+            .gte('analyzed_at', new Date(Date.now() - 15 * 60000).toISOString()) // son 15 dakika
             .limit(1);
           
           if (existing && existing.length > 0) {

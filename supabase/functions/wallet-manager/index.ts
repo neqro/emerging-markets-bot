@@ -76,6 +76,31 @@ function base58Decode(str: string): Uint8Array {
   return result.reverse();
 }
 
+// Fetch SOL balance from Solana RPC
+async function getSolBalance(publicKey: string): Promise<number> {
+  try {
+    const rpcUrl = 'https://api.mainnet-beta.solana.com';
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getBalance',
+        params: [publicKey],
+      }),
+    });
+    const data = await res.json();
+    if (data.result?.value !== undefined) {
+      return data.result.value / 1e9; // lamports to SOL
+    }
+    return 0;
+  } catch (e) {
+    console.error('Balance fetch error:', e);
+    return 0;
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -122,6 +147,76 @@ serve(async (req) => {
         });
       }
 
+      // Fetch live balance from Solana and update DB
+      const liveBalance = await getSolBalance(wallet.public_key);
+      if (liveBalance !== wallet.sol_balance) {
+        await supabase
+          .from('user_wallets')
+          .update({ sol_balance: liveBalance })
+          .eq('id', wallet.id);
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        wallet: {
+          id: wallet.id,
+          publicKey: wallet.public_key,
+          balance: liveBalance,
+          createdAt: wallet.created_at,
+        },
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ===== CREATE WALLET =====
+    if (action === 'create-wallet') {
+      // Check if wallet already exists
+      const { data: existing } = await supabase
+        .from('user_wallets')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (existing) {
+        return new Response(JSON.stringify({ error: 'Wallet already exists' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Generate Ed25519 keypair using Web Crypto
+      const keyPair = await crypto.subtle.generateKey(
+        { name: 'Ed25519' },
+        true,
+        ['sign', 'verify']
+      );
+
+      const privateKeyRaw = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.privateKey));
+      const publicKeyRaw = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.publicKey));
+
+      // Solana keypair is 64 bytes: private (32) + public (32)
+      const fullKeypair = new Uint8Array(64);
+      fullKeypair.set(privateKeyRaw, 0);
+      fullKeypair.set(publicKeyRaw, 32);
+
+      const publicKeyBase58 = base58Encode(publicKeyRaw);
+      const encryptedKey = encryptKey(fullKeypair, encryptionSecret);
+
+      const { data: wallet, error } = await supabase
+        .from('user_wallets')
+        .insert({
+          user_id: user.id,
+          public_key: publicKeyBase58,
+          encrypted_private_key: encryptedKey,
+          sol_balance: 0,
+        })
+        .select('id, public_key, sol_balance, created_at')
+        .single();
+
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       return new Response(JSON.stringify({
         success: true,
         wallet: {
@@ -131,6 +226,146 @@ serve(async (req) => {
           createdAt: wallet.created_at,
         },
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ===== EXPORT PRIVATE KEY =====
+    if (action === 'export-key') {
+      const { password } = body;
+      if (!password) {
+        return new Response(JSON.stringify({ error: 'Password required' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Verify password by attempting sign-in
+      const { error: signInError } = await supabaseUser.auth.signInWithPassword({
+        email: user.email!,
+        password,
+      });
+
+      if (signInError) {
+        return new Response(JSON.stringify({ error: 'Invalid password' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Get encrypted key
+      const { data: wallet } = await supabase
+        .from('user_wallets')
+        .select('encrypted_private_key')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!wallet) {
+        return new Response(JSON.stringify({ error: 'No wallet found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Decrypt and return as base58
+      const decryptedKeypair = decryptKey(wallet.encrypted_private_key, encryptionSecret);
+      const privateKeyBase58 = base58Encode(decryptedKeypair);
+
+      return new Response(JSON.stringify({
+        success: true,
+        privateKey: privateKeyBase58,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ===== EXECUTE TRADE =====
+    if (action === 'execute-trade') {
+      const { tokenAddress, tokenSymbol, orderType, amountSol } = body;
+
+      const { data: wallet } = await supabase
+        .from('user_wallets')
+        .select('id, sol_balance')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!wallet) {
+        return new Response(JSON.stringify({ error: 'No wallet found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (orderType === 'buy' && wallet.sol_balance < amountSol) {
+        return new Response(JSON.stringify({ error: 'Insufficient balance' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Record trade order as pending
+      const { data: trade, error } = await supabase
+        .from('trade_orders')
+        .insert({
+          user_id: user.id,
+          wallet_id: wallet.id,
+          token_address: tokenAddress,
+          token_symbol: tokenSymbol || null,
+          order_type: orderType,
+          amount_sol: amountSol,
+          status: 'pending',
+        })
+        .select()
+        .single();
+
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({ success: true, trade }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ===== WITHDRAW =====
+    if (action === 'withdraw') {
+      const { destinationAddress, amountSol } = body;
+
+      const { data: wallet } = await supabase
+        .from('user_wallets')
+        .select('id, public_key, sol_balance')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!wallet) {
+        return new Response(JSON.stringify({ error: 'No wallet found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (wallet.sol_balance < amountSol) {
+        return new Response(JSON.stringify({ error: 'Insufficient balance' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Record withdrawal as trade order
+      const { data: trade, error } = await supabase
+        .from('trade_orders')
+        .insert({
+          user_id: user.id,
+          wallet_id: wallet.id,
+          token_address: destinationAddress,
+          token_symbol: 'SOL',
+          order_type: 'withdraw',
+          amount_sol: amountSol,
+          status: 'pending',
+        })
+        .select()
+        .single();
+
+      if (error) {
+        return new Response(JSON.stringify({ error: error.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({ success: true, trade }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // ===== GET TRADE HISTORY =====

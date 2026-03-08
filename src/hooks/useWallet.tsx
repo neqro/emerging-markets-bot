@@ -82,7 +82,7 @@ export const useWallet = () => {
         tokenAddress, tokenSymbol, orderType, amountSol,
       });
       if (data.success) {
-        await fetchWallet(); // refresh balance
+        await fetchWallet();
         await fetchTrades();
       }
       return data;
@@ -92,6 +92,31 @@ export const useWallet = () => {
       setTradeLoading(false);
     }
   }, [callWalletManager, fetchWallet]);
+
+  const withdraw = useCallback(async (destinationAddress: string, amountSol: number) => {
+    setTradeLoading(true);
+    try {
+      const data = await callWalletManager('withdraw', { destinationAddress, amountSol });
+      if (data.success) {
+        await fetchWallet();
+        await fetchTrades();
+      }
+      return data;
+    } catch (e) {
+      return { error: String(e) };
+    } finally {
+      setTradeLoading(false);
+    }
+  }, [callWalletManager, fetchWallet]);
+
+  const exportPrivateKey = useCallback(async (password: string) => {
+    try {
+      const data = await callWalletManager('export-key', { password });
+      return data;
+    } catch (e) {
+      return { error: String(e) };
+    }
+  }, [callWalletManager]);
 
   const fetchTrades = useCallback(async () => {
     if (!user || !session) return;

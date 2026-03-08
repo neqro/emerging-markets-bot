@@ -599,20 +599,6 @@ serve(async (req) => {
 
                   console.log(`🔴 AUTO SELL: ${signal.token_symbol} | ~${sellAmount} SOL | Güven: ${signal.confidence_score}%`);
 
-                  const { data: sellOrder } = await supabase
-                    .from('trade_orders')
-                    .insert({
-                      user_id: settings.user_id,
-                      wallet_id: wallet.id,
-                      token_address: signal.token_address,
-                      token_symbol: signal.token_symbol,
-                      order_type: 'sell',
-                      amount_sol: sellAmount,
-                      status: 'executing',
-                    })
-                    .select()
-                    .single();
-
                   try {
                     const SOL_MINT = 'So11111111111111111111111111111111111111112';
                     const amountLamports = Math.floor(sellAmount * 1e9);
@@ -621,7 +607,6 @@ serve(async (req) => {
                       `https://quote-api.jup.ag/v6/quote?inputMint=${signal.token_address}&outputMint=${SOL_MINT}&amount=${amountLamports}&slippageBps=500`
                     );
                     const quote = await quoteRes.json();
-
                     if (quote.error) throw new Error(quote.error);
 
                     const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
@@ -650,22 +635,29 @@ serve(async (req) => {
                     const sendData = await sendRes.json();
                     if (sendData.error) throw new Error(sendData.error.message);
 
-                    await supabase.from('trade_orders').update({
+                    // ✅ İşlem blockchain'de başarılı — şimdi kaydet
+                    await supabase.from('trade_orders').insert({
+                      user_id: settings.user_id,
+                      wallet_id: wallet.id,
+                      token_address: signal.token_address,
+                      token_symbol: signal.token_symbol,
+                      order_type: 'sell',
+                      amount_sol: sellAmount,
                       status: 'completed',
                       tx_signature: sendData.result,
-                    }).eq('id', sellOrder!.id);
+                    });
 
                     wallet.sol_balance += sellAmount;
                     await supabase.from('user_wallets').update({ sol_balance: wallet.sol_balance }).eq('id', wallet.id);
 
                     openTokens.delete(signal.token_address);
                     autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, amount: sellAmount, status: 'completed' });
-                    console.log(`✅ AUTO SELL tamamlandı: ${signal.token_symbol}`);
+                    console.log(`✅ AUTO SELL tamamlandı: ${signal.token_symbol} | tx: ${sendData.result}`);
 
                   } catch (tradeErr) {
-                    await supabase.from('trade_orders').update({ status: 'failed', error_message: String(tradeErr) }).eq('id', sellOrder!.id);
+                    // ❌ Başarısız — veritabanına HİÇBİR ŞEY kaydetme
                     autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, status: 'failed', error: String(tradeErr) });
-                    console.error(`❌ AUTO SELL hata: ${signal.token_symbol}:`, tradeErr);
+                    console.error(`❌ AUTO SELL hata (kayıt oluşturulmadı): ${signal.token_symbol}:`, tradeErr);
                   }
                 }
               }

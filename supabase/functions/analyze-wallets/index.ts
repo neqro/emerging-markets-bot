@@ -272,13 +272,16 @@ serve(async (req) => {
           const top10Supply = holders.slice(0, 10).reduce((sum: number, h: any) => sum + parseFloat(h.amount || '0'), 0);
           const top10Percentage = totalSupply > 0 ? (top10Supply / totalSupply) * 100 : 0;
 
-          // Risk skoru
-          const riskScore = Math.min(
-            botAnalysis.botScore * 0.4 +
-            (top10Percentage > 50 ? 30 : top10Percentage > 30 ? 15 : 0) +
-            (whaleAnalysis.whalesInterested === 0 ? 20 : 0),
+          // Risk skoru - yeni token'lar doğal olarak yüksek top10'a sahip, bunu normalleştir
+          const holderRisk = top10Percentage > 90 ? 25 : top10Percentage > 70 ? 15 : top10Percentage > 50 ? 10 : 0;
+          const botRisk = botAnalysis.botScore * 0.35;
+          const whaleBonus = whaleAnalysis.whalesInterested > 0 ? -10 : 10;
+          const volumeBonus = volume24h > 100000 ? -10 : volume24h > 50000 ? -5 : 0;
+          const liquidityBonus = liquidity > 20000 ? -10 : liquidity > 10000 ? -5 : 5;
+          const riskScore = Math.max(0, Math.min(
+            botRisk + holderRisk + whaleBonus + 20 + volumeBonus + liquidityBonus,
             100
-          );
+          ));
 
           // Token analizi kaydet
           await supabase.from('token_analysis').insert({
@@ -290,47 +293,84 @@ serve(async (req) => {
             risk_score: riskScore,
           });
 
-          // Sinyal mantığı — her token için sinyal üret
+          // Sinyal mantığı — çeşitlendirilmiş buy/sell/watch sinyalleri
           let signalType: string = 'watch';
           let reason = '';
           let confidence = 0;
           const priceChange1h = tokenInfo?.priceChange?.h1 || 0;
+          const priceChange5m = tokenInfo?.priceChange?.m5 || 0;
           const txnsBuys = tokenInfo?.txns?.h1?.buys || 0;
           const txnsSells = tokenInfo?.txns?.h1?.sells || 0;
           const buyPressure = txnsBuys + txnsSells > 0 ? (txnsBuys / (txnsBuys + txnsSells)) * 100 : 50;
+          const totalTxns = txnsBuys + txnsSells;
 
-          if (whaleAnalysis.whalesInterested >= 2 && botAnalysis.botScore < 30 && riskScore < 40) {
+          // === STRONG BUY: Whale + düşük risk ===
+          if (whaleAnalysis.whalesInterested >= 2 && riskScore < 35) {
             signalType = 'buy';
-            confidence = Math.max(60, 100 - riskScore);
-            reason = `🐋 ${whaleAnalysis.whalesInterested} whale alım yaptı | Bot: ${botAnalysis.botScore}% | Liq: $${(liquidity / 1000).toFixed(1)}K`;
-          } else if (whaleAnalysis.whalesInterested >= 1 && botAnalysis.botScore < 50) {
+            confidence = Math.min(90, 70 + whaleAnalysis.whalesInterested * 5);
+            reason = `🐋 ${whaleAnalysis.whalesInterested} whale alım yaptı | Risk: ${riskScore.toFixed(0)}% | Liq: $${(liquidity / 1000).toFixed(1)}K`;
+          }
+          // === BUY: Yüksek hacim + alım baskısı + kabul edilebilir risk ===
+          else if (buyPressure > 55 && volume24h > 30000 && riskScore < 45 && liquidity > 8000) {
             signalType = 'buy';
-            confidence = Math.max(50, 80 - riskScore);
-            reason = `👀 ${whaleAnalysis.whalesInterested} whale ilgileniyor | Risk: ${riskScore.toFixed(0)}% | Vol: $${(volume24h / 1000).toFixed(1)}K`;
-          } else if (botAnalysis.botScore > 70) {
+            confidence = Math.min(80, Math.round(buyPressure * 0.6 + (100 - riskScore) * 0.3));
+            reason = `📈 Alım baskısı %${buyPressure.toFixed(0)} | Vol: $${(volume24h / 1000).toFixed(1)}K | ${priceChange1h > 0 ? '↑' : '↓'}${Math.abs(priceChange1h).toFixed(1)}% 1h`;
+          }
+          // === BUY: Whale ilgileniyor + düşük bot ===
+          else if (whaleAnalysis.whalesInterested >= 1 && botAnalysis.botScore < 40 && riskScore < 50) {
+            signalType = 'buy';
+            confidence = Math.min(70, 55 + whaleAnalysis.whalesInterested * 10);
+            reason = `👀 ${whaleAnalysis.whalesInterested} whale ilgileniyor | Bot: ${botAnalysis.botScore}% | Liq: $${(liquidity / 1000).toFixed(1)}K`;
+          }
+          // === BUY: Momentum — fiyat yükseliyor + güçlü hacim ===
+          else if (priceChange1h > 20 && volume24h > 50000 && riskScore < 45 && buyPressure > 50) {
+            signalType = 'buy';
+            confidence = Math.min(75, Math.round(40 + priceChange1h * 0.3));
+            reason = `🚀 Momentum ↑${priceChange1h.toFixed(0)}% 1h | Vol: $${(volume24h / 1000).toFixed(1)}K | ${totalTxns} işlem`;
+          }
+          // === BUY: Yeni token, iyi likidite, düşük risk ===
+          else if (riskScore < 35 && liquidity > 10000 && totalTxns > 100) {
+            signalType = 'buy';
+            confidence = Math.min(65, Math.round(60 - riskScore * 0.5));
+            reason = `💎 Düşük risk (${riskScore.toFixed(0)}%) | Liq: $${(liquidity / 1000).toFixed(1)}K | ${totalTxns} işlem`;
+          }
+          // === SELL: Yüksek bot aktivitesi ===
+          else if (botAnalysis.botScore > 65) {
             signalType = 'sell';
-            confidence = botAnalysis.botScore;
+            confidence = Math.min(90, botAnalysis.botScore);
             reason = `🤖 Yüksek bot aktivitesi (${botAnalysis.botScore}%) | Top10: ${top10Percentage.toFixed(0)}% | RUG RİSKİ`;
-          } else if (botAnalysis.botScore > 40 && top10Percentage > 60) {
+          }
+          // === SELL: Bot + yoğun sahiplik ===
+          else if (botAnalysis.botScore > 35 && top10Percentage > 85) {
             signalType = 'sell';
-            confidence = Math.min(botAnalysis.botScore + 20, 90);
-            reason = `⚠️ Bot: ${botAnalysis.botScore}% | Top10: ${top10Percentage.toFixed(0)}% sahiplik | Dikkatli ol`;
-          } else if (riskScore < 40 && liquidity > 10000 && buyPressure > 55) {
-            signalType = 'buy';
-            confidence = Math.max(40, 85 - riskScore);
-            reason = `📈 Alım baskısı %${buyPressure.toFixed(0)} | Risk: ${riskScore.toFixed(0)}% | Liq: $${(liquidity / 1000).toFixed(1)}K`;
-          } else if (riskScore < 50 && volume24h > 50000) {
-            signalType = 'watch';
-            confidence = Math.max(35, 70 - riskScore);
-            reason = `📊 Yüksek hacim $${(volume24h / 1000).toFixed(1)}K | Risk: ${riskScore.toFixed(0)}% | ${priceChange1h > 0 ? '↑' : '↓'}${Math.abs(priceChange1h).toFixed(1)}% 1h`;
-          } else if (riskScore >= 50) {
+            confidence = Math.min(80, Math.round(botAnalysis.botScore + 15));
+            reason = `⚠️ Bot: ${botAnalysis.botScore}% | Top10: ${top10Percentage.toFixed(0)}% | Dikkatli ol`;
+          }
+          // === SELL: Fiyat düşüyor + satış baskısı ===
+          else if (priceChange1h < -30 && buyPressure < 45 && riskScore > 40) {
             signalType = 'sell';
-            confidence = Math.min(riskScore, 85);
+            confidence = Math.min(75, Math.round(50 + Math.abs(priceChange1h) * 0.3));
+            reason = `📉 Düşüş ↓${Math.abs(priceChange1h).toFixed(0)}% 1h | Satış baskısı %${(100 - buyPressure).toFixed(0)} | Risk: ${riskScore.toFixed(0)}%`;
+          }
+          // === SELL: Çok yüksek risk ===
+          else if (riskScore >= 60) {
+            signalType = 'sell';
+            confidence = Math.min(85, Math.round(riskScore));
             reason = `🔴 Yüksek risk (${riskScore.toFixed(0)}%) | Bot: ${botAnalysis.botScore}% | Top10: ${top10Percentage.toFixed(0)}%`;
-          } else {
+          }
+          // === WATCH: Yüksek hacim ama kararsız ===
+          else if (volume24h > 50000 && riskScore < 55) {
             signalType = 'watch';
-            confidence = Math.max(20, 50 - riskScore);
-            reason = `👁️ İzleniyor | Risk: ${riskScore.toFixed(0)}% | Liq: $${(liquidity / 1000).toFixed(1)}K | Vol: $${(volume24h / 1000).toFixed(1)}K`;
+            confidence = Math.min(60, Math.round(50 + volume24h / 100000 * 10));
+            reason = `📊 Yüksek hacim $${(volume24h / 1000).toFixed(1)}K | Risk: ${riskScore.toFixed(0)}% | ${priceChange1h > 0 ? '↑' : '↓'}${Math.abs(priceChange1h).toFixed(1)}% 1h`;
+          }
+          // === WATCH: Orta risk, izle ===
+          else {
+            signalType = riskScore < 45 ? 'watch' : 'sell';
+            confidence = Math.max(25, Math.round(50 - riskScore * 0.3));
+            reason = riskScore < 45
+              ? `👁️ İzleniyor | Risk: ${riskScore.toFixed(0)}% | Liq: $${(liquidity / 1000).toFixed(1)}K | Vol: $${(volume24h / 1000).toFixed(1)}K`
+              : `⚠️ Orta risk (${riskScore.toFixed(0)}%) | Top10: ${top10Percentage.toFixed(0)}% | Vol: $${(volume24h / 1000).toFixed(1)}K`;
           }
 
           // Her token için sinyal kaydet

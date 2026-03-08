@@ -1,4 +1,4 @@
-// DexScreener public API for Base chain
+// DexScreener public API for Solana chain
 const BASE_URL = "https://api.dexscreener.com";
 const BASE_CHAIN = "solana";
 

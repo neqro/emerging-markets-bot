@@ -553,6 +553,29 @@ serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // ===== DELETE ACCOUNT =====
+    if (action === 'delete-account') {
+      try {
+        // Delete user's wallet data
+        await supabase.from('trade_orders').delete().eq('user_id', user.id);
+        await supabase.from('auto_trade_settings').delete().eq('user_id', user.id);
+        await supabase.from('user_wallets').delete().eq('user_id', user.id);
+        await supabase.from('login_history').delete().eq('user_id', user.id);
+
+        // Delete the auth user
+        const { error: deleteError } = await supabase.auth.admin.deleteUser(user.id);
+        if (deleteError) throw deleteError;
+
+        return new Response(JSON.stringify({ success: true, message: 'Account deleted' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: `Account deletion failed: ${e}` }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     return new Response(JSON.stringify({ error: 'Invalid action' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

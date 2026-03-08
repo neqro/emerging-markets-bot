@@ -272,13 +272,16 @@ serve(async (req) => {
           const top10Supply = holders.slice(0, 10).reduce((sum: number, h: any) => sum + parseFloat(h.amount || '0'), 0);
           const top10Percentage = totalSupply > 0 ? (top10Supply / totalSupply) * 100 : 0;
 
-          // Risk skoru
-          const riskScore = Math.min(
-            botAnalysis.botScore * 0.4 +
-            (top10Percentage > 50 ? 30 : top10Percentage > 30 ? 15 : 0) +
-            (whaleAnalysis.whalesInterested === 0 ? 20 : 0),
+          // Risk skoru - yeni token'lar doğal olarak yüksek top10'a sahip, bunu normalleştir
+          const holderRisk = top10Percentage > 90 ? 25 : top10Percentage > 70 ? 15 : top10Percentage > 50 ? 10 : 0;
+          const botRisk = botAnalysis.botScore * 0.35;
+          const whaleBonus = whaleAnalysis.whalesInterested > 0 ? -10 : 10;
+          const volumeBonus = volume24h > 100000 ? -10 : volume24h > 50000 ? -5 : 0;
+          const liquidityBonus = liquidity > 20000 ? -10 : liquidity > 10000 ? -5 : 5;
+          const riskScore = Math.max(0, Math.min(
+            botRisk + holderRisk + whaleBonus + 20 + volumeBonus + liquidityBonus,
             100
-          );
+          ));
 
           // Token analizi kaydet
           await supabase.from('token_analysis').insert({

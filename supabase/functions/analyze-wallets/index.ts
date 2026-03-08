@@ -232,8 +232,15 @@ serve(async (req) => {
     if (action === 'auto-scan') {
       console.log('🔍 Otomatik tarama başlatılıyor...');
       
+      // Eski sinyalleri deaktive et (30 dk'dan eski)
+      await supabase
+        .from('bot_signals')
+        .update({ is_active: false })
+        .eq('is_active', true)
+        .lt('created_at', new Date(Date.now() - 30 * 60000).toISOString());
+      
       const tokenAddresses = await getNewSolanaTokens();
-      console.log(`📋 ${tokenAddresses.length} yeni token bulundu`);
+      console.log(`📋 ${tokenAddresses.length} token bulundu`);
       
       const results = [];
       

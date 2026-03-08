@@ -180,20 +180,28 @@ async function checkWhaleInterest(
   };
 }
 
-// DexScreener'dan yeni Solana token'larını al
+// DexScreener'dan yeni + trending Solana token'larını al
 async function getNewSolanaTokens(): Promise<string[]> {
+  const tokens = new Set<string>();
   try {
-    const res = await fetch('https://api.dexscreener.com/token-profiles/latest/v1');
-    const profiles = await res.json();
+    // Yeni token profilleri
+    const [newRes, trendRes] = await Promise.all([
+      fetch('https://api.dexscreener.com/token-profiles/latest/v1'),
+      fetch('https://api.dexscreener.com/token-boosts/top/v1'),
+    ]);
+    const newProfiles = await newRes.json();
+    const trendProfiles = await trendRes.json();
     
-    return profiles
-      .filter((p: any) => p.chainId === 'solana')
-      .slice(0, 15)
-      .map((p: any) => p.tokenAddress);
+    for (const p of (newProfiles || []).filter((p: any) => p.chainId === 'solana').slice(0, 15)) {
+      tokens.add(p.tokenAddress);
+    }
+    for (const p of (trendProfiles || []).filter((p: any) => p.chainId === 'solana').slice(0, 10)) {
+      tokens.add(p.tokenAddress);
+    }
   } catch (error) {
-    console.error('Error fetching new tokens:', error);
-    return [];
+    console.error('Error fetching tokens:', error);
   }
+  return [...tokens];
 }
 
 // DexScreener'dan token bilgisi al

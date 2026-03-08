@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useAuth } from "./useAuth";
 
-const SCAN_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const SCAN_INTERVAL = 30 * 1000; // 30 seconds
 
 export const useAnalyzerScheduler = () => {
   const { session } = useAuth();

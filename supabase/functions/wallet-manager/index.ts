@@ -77,6 +77,40 @@ function base58Decode(str: string): Uint8Array {
   return result.reverse();
 }
 
+function normalizeSecretKey(raw: Uint8Array): Uint8Array {
+  // Standard Solana/tweetnacl secret key (64 bytes)
+  if (raw.length === 64) return raw;
+
+  // Seed-only key (32 bytes)
+  if (raw.length === 32) {
+    return nacl.sign.keyPair.fromSeed(raw).secretKey;
+  }
+
+  // Ed25519 PKCS8 (48 bytes): 16-byte prefix + 32-byte seed
+  const pkcs8Ed25519Prefix = new Uint8Array([
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+    0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+  ]);
+
+  if (raw.length === 48) {
+    const prefixMatches = pkcs8Ed25519Prefix.every((b, i) => raw[i] === b);
+    if (prefixMatches) {
+      const seed = raw.slice(16, 48);
+      return nacl.sign.keyPair.fromSeed(seed).secretKey;
+    }
+  }
+
+  // Fallback: detect ASN.1 OCTET STRING marker (04 20) and use following 32 bytes as seed
+  for (let i = 0; i <= raw.length - 34; i++) {
+    if (raw[i] === 0x04 && raw[i + 1] === 0x20) {
+      const seed = raw.slice(i + 2, i + 34);
+      return nacl.sign.keyPair.fromSeed(seed).secretKey;
+    }
+  }
+
+  throw new Error(`Unsupported private key format (${raw.length} bytes)`);
+}
+
 // Fetch SOL balance from Solana RPC
 async function getSolBalance(publicKey: string): Promise<number> {
   try {
@@ -251,9 +285,10 @@ serve(async (req) => {
         });
       }
 
-      // Decrypt and return as base58
-      const decryptedKeypair = decryptKey(wallet.encrypted_private_key, encryptionSecret);
-      const privateKeyBase58 = base58Encode(decryptedKeypair);
+      // Decrypt, normalize and return as base58 (always 64-byte Solana secret key)
+      const decryptedKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
+      const normalizedKeypair = normalizeSecretKey(decryptedKey);
+      const privateKeyBase58 = base58Encode(normalizedKeypair);
 
       return new Response(JSON.stringify({
         success: true,
@@ -319,6 +354,19 @@ serve(async (req) => {
         });
       }
 
+      // Validate destination address (must be valid 32-byte Solana public key)
+      let destinationPubkeyBytes: Uint8Array;
+      try {
+        destinationPubkeyBytes = base58Decode(destinationAddress);
+        if (destinationPubkeyBytes.length !== 32) {
+          throw new Error(`Invalid destination length: ${destinationPubkeyBytes.length}`);
+        }
+      } catch {
+        return new Response(JSON.stringify({ error: 'Geçersiz Solana adresi' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       const { data: wallet } = await supabase
         .from('user_wallets')
         .select('id, public_key, sol_balance, encrypted_private_key')
@@ -340,23 +388,19 @@ serve(async (req) => {
         });
       }
 
-      // Decrypt private key
+      // Decrypt private key (supports legacy formats)
       let secretKey: Uint8Array;
       try {
-        secretKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
-        // Validate: must be 64 bytes for Ed25519 (nacl sign keypair)
-        if (secretKey.length !== 64) {
-          throw new Error(`Invalid key length: ${secretKey.length}, expected 64`);
-        }
+        const rawKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
+        secretKey = normalizeSecretKey(rawKey);
+
         // Verify the public key matches
-        const derivedPubKey = secretKey.slice(32);
-        const storedPubKeyBytes = base58Decode(wallet.public_key);
-        const pubKeysMatch = derivedPubKey.every((b, i) => b === storedPubKeyBytes[i]);
-        if (!pubKeysMatch) {
+        const derivedPubKeyBase58 = base58Encode(secretKey.slice(32));
+        if (derivedPubKeyBase58 !== wallet.public_key) {
           throw new Error('Decrypted key does not match wallet public key');
         }
       } catch (e) {
-        console.error('Key decryption error:', e);
+        console.error('Key decryption/normalization error:', e);
         return new Response(JSON.stringify({ error: 'Private key formatı hatalı. Lütfen yeni cüzdan oluşturun.' }), {
           status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -385,7 +429,7 @@ serve(async (req) => {
 
         // Build transaction manually (SystemProgram.transfer)
         const fromPubkey = base58Decode(wallet.public_key);
-        const toPubkey = base58Decode(destinationAddress);
+        const toPubkey = destinationPubkeyBytes;
         const lamports = Math.floor(amountSol * 1e9);
 
         // System Program ID (all zeros)

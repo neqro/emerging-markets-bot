@@ -627,43 +627,15 @@ serve(async (req) => {
                   console.log(`🟢 AUTO BUY: ${signal.token_symbol} | ${tradeAmount} SOL | Güven: ${signal.confidence_score}%`);
 
                   // Blockchain'de swap yap, SADECE başarılıysa kaydet
-                  try {
-                    const SOL_MINT = 'So11111111111111111111111111111111111111112';
-                    const amountLamports = Math.floor(tradeAmount * 1e9);
+                  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+                  const amountLamports = Math.floor(tradeAmount * 1e9);
 
-                    const quoteRes = await fetch(
-                      `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${signal.token_address}&amount=${amountLamports}&slippageBps=300`
-                    );
-                    const quote = await quoteRes.json();
-                    if (quote.error) throw new Error(quote.error);
+                  const buyResult = await executeJupiterSwap(
+                    SOL_MINT, signal.token_address, amountLamports,
+                    walletSecretKey, wallet.public_key, 300
+                  );
 
-                    const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        quoteResponse: quote,
-                        userPublicKey: wallet.public_key,
-                        wrapAndUnwrapSol: true,
-                        dynamicComputeUnitLimit: true,
-                        prioritizationFeeLamports: 'auto',
-                      }),
-                    });
-                    const swapData = await swapRes.json();
-                    if (swapData.error) throw new Error(swapData.error);
-
-                    const sendRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        jsonrpc: '2.0', id: 1,
-                        method: 'sendTransaction',
-                        params: [swapData.swapTransaction, { encoding: 'base64' }],
-                      }),
-                    });
-                    const sendData = await sendRes.json();
-                    if (sendData.error) throw new Error(sendData.error.message);
-
-                    // ✅ İşlem blockchain'de başarılı — şimdi kaydet
+                  if (buyResult.success && buyResult.txSignature) {
                     await supabase.from('trade_orders').insert({
                       user_id: settings.user_id,
                       wallet_id: wallet.id,
@@ -672,11 +644,10 @@ serve(async (req) => {
                       order_type: 'buy',
                       amount_sol: tradeAmount,
                       status: 'completed',
-                      tx_signature: sendData.result,
-                      price_at_trade: quote.outAmount ? Number(quote.outAmount) / 1e6 : null,
+                      tx_signature: buyResult.txSignature,
+                      price_at_trade: buyResult.outAmount ? buyResult.outAmount / 1e6 : null,
                     });
 
-                    // Bakiye ve günlük kullanım güncelle
                     settings.daily_sol_used += tradeAmount;
                     wallet.sol_balance -= tradeAmount;
                     await supabase.from('user_wallets').update({ sol_balance: Math.max(0, wallet.sol_balance) }).eq('id', wallet.id);
@@ -684,12 +655,11 @@ serve(async (req) => {
 
                     openTokens.add(signal.token_address);
                     autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'completed' });
-                    console.log(`✅ AUTO BUY tamamlandı: ${signal.token_symbol} | ${tradeAmount} SOL | tx: ${sendData.result}`);
-
-                  } catch (tradeErr) {
-                    // ❌ Başarısız — veritabanına HİÇBİR ŞEY kaydetme
-                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'failed', error: String(tradeErr) });
-                    console.error(`❌ AUTO BUY hata (kayıt oluşturulmadı): ${signal.token_symbol}:`, tradeErr);
+                    console.log(`✅ AUTO BUY tamamlandı: ${signal.token_symbol} | ${tradeAmount} SOL | tx: ${buyResult.txSignature}`);
+                  } else {
+                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'failed', error: buyResult.error });
+                    console.error(`❌ AUTO BUY hata: ${signal.token_symbol}: ${buyResult.error}`);
+                  }
                   }
                 }
 

@@ -6,7 +6,7 @@ export const StatusBar = () => {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <div className="h-2 w-2 rounded-full bg-primary animate-pulse-glow" />
-          <span className="text-xs text-muted-foreground">BASE CHAIN</span>
+          <span className="text-xs text-muted-foreground">SOLANA CHAIN</span>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Wifi className="h-3 w-3 text-primary" />

@@ -225,8 +225,8 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const body = await req.json();
-    const { action } = body;
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action || 'auto-scan';
 
     // ===== OTOMATİK TARAMA =====
     if (action === 'auto-scan') {

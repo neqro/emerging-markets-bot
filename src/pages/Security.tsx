@@ -1,6 +1,7 @@
 import { ArrowLeft, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { useLanguage } from "@/hooks/useLanguage";
 import { TwoFactorSetup } from "@/components/security/TwoFactorSetup";
 import { ChangePassword } from "@/components/security/ChangePassword";
 import { SessionManager } from "@/components/security/SessionManager";
@@ -9,6 +10,7 @@ import { DeleteAccount } from "@/components/security/DeleteAccount";
 
 const Security = () => {
   const navigate = useNavigate();
+  const { t } = useLanguage();
 
   return (
     <div className="min-h-screen bg-background terminal-grid">
@@ -18,7 +20,7 @@ const Security = () => {
         </Button>
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-primary" />
-          <h1 className="text-lg font-display font-bold text-foreground">Güvenlik</h1>
+          <h1 className="text-lg font-display font-bold text-foreground">{t("security.title")}</h1>
         </div>
       </header>
 

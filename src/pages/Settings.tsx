@@ -1,38 +1,140 @@
-import { ArrowLeft, Sun, Moon, Palette, Monitor, Shield, ChevronRight } from "lucide-react";
+import { ArrowLeft, Sun, Moon, Monitor, Palette, Shield, ChevronRight, Key, User, Globe, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useNavigate } from "react-router-dom";
-import { useTheme, themePresets, ThemePreset } from "@/hooks/useTheme";
-import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useNavigate } from "react-router-dom";
+import { useTheme, themePresets, ThemePreset } from "@/hooks/useTheme";
+import { useLanguage, Language } from "@/hooks/useLanguage";
+import { useProfile } from "@/hooks/useProfile";
+import { useWallet } from "@/hooks/useWallet";
+import { useState, useEffect } from "react";
+import { ExportKeyDialog } from "@/components/dashboard/ExportKeyDialog";
+import { toast } from "@/components/ui/sonner";
 
 const Settings = () => {
   const navigate = useNavigate();
   const { theme, setMode, setPreset, setCustomAccent } = useTheme();
+  const { language, setLanguage, t } = useLanguage();
+  const { profile, updateProfile } = useProfile();
+  const { wallet } = useWallet();
+
   const [customH, setCustomH] = useState("280");
   const [customS, setCustomS] = useState("72");
   const [customL, setCustomL] = useState("50");
+
+  const [username, setUsername] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [exportKeyOpen, setExportKeyOpen] = useState(false);
+
+  useEffect(() => {
+    if (profile) {
+      setUsername(profile.username || "");
+      setAvatarUrl(profile.avatar_url || "");
+    }
+  }, [profile]);
 
   const applyCustom = () => {
     setCustomAccent(`${customH} ${customS}% ${customL}%`);
   };
 
+  const handleSaveProfile = async () => {
+    const { error } = await updateProfile({ username: username || null, avatar_url: avatarUrl || null }) || {};
+    if (!error) toast.success(t("settings.profileSaved"));
+  };
+
+  const languages: { value: Language; label: string; flag: string }[] = [
+    { value: "tr", label: "Türkçe", flag: "🇹🇷" },
+    { value: "en", label: "English", flag: "🇺🇸" },
+  ];
+
   return (
     <div className="min-h-screen bg-background terminal-grid">
-      {/* Header */}
       <header className="flex items-center gap-3 px-4 py-4 border-b border-border">
         <Button variant="ghost" size="icon" onClick={() => navigate("/")} className="h-8 w-8">
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <h1 className="text-lg font-display font-bold text-foreground">Ayarlar</h1>
+        <h1 className="text-lg font-display font-bold text-foreground">{t("settings.title")}</h1>
       </header>
 
       <div className="max-w-lg mx-auto p-4 space-y-6">
+
+        {/* Profile */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
+            <User className="h-4 w-4 text-primary" />
+            {t("settings.profile")}
+          </h2>
+          <div className="rounded-lg bg-card border border-border p-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Avatar" className="h-12 w-12 rounded-full object-cover border-2 border-primary/30" />
+                ) : (
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center border-2 border-primary/30">
+                    <User className="h-6 w-6 text-primary" />
+                  </div>
+                )}
+                <Camera className="absolute -bottom-1 -right-1 h-4 w-4 text-muted-foreground" />
+              </div>
+              <div className="flex-1 space-y-2">
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">{t("settings.username")}</Label>
+                  <Input
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder={t("settings.usernamePlaceholder")}
+                    className="h-8 text-xs bg-secondary border-border"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">{t("settings.avatar")}</Label>
+                  <Input
+                    value={avatarUrl}
+                    onChange={(e) => setAvatarUrl(e.target.value)}
+                    placeholder={t("settings.avatarDesc")}
+                    className="h-8 text-xs bg-secondary border-border"
+                  />
+                </div>
+              </div>
+            </div>
+            <Button onClick={handleSaveProfile} size="sm" className="w-full h-8 text-xs font-mono">
+              {t("settings.saveProfile")}
+            </Button>
+          </div>
+        </section>
+
+        {/* Language */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
+            <Globe className="h-4 w-4 text-primary" />
+            {t("settings.language")}
+          </h2>
+          <div className="grid grid-cols-2 gap-2">
+            {languages.map((lang) => (
+              <button
+                key={lang.value}
+                onClick={() => {
+                  setLanguage(lang.value);
+                  updateProfile({ language: lang.value });
+                }}
+                className={`flex items-center gap-2 p-3 rounded-lg border text-xs font-mono transition-all ${
+                  language === lang.value
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-card text-muted-foreground hover:border-muted-foreground"
+                }`}
+              >
+                <span className="text-base">{lang.flag}</span>
+                {lang.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
         {/* Mode Toggle */}
         <section className="space-y-3">
           <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
             <Monitor className="h-4 w-4 text-primary" />
-            Görünüm Modu
+            {t("settings.appearance")}
           </h2>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -44,7 +146,7 @@ const Settings = () => {
               }`}
             >
               <Moon className="h-4 w-4" />
-              Dark Mode
+              {t("common.dark")}
             </button>
             <button
               onClick={() => setMode("light")}
@@ -55,7 +157,7 @@ const Settings = () => {
               }`}
             >
               <Sun className="h-4 w-4" />
-              Light Mode
+              {t("common.light")}
             </button>
           </div>
         </section>
@@ -64,7 +166,7 @@ const Settings = () => {
         <section className="space-y-3">
           <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
             <Palette className="h-4 w-4 text-primary" />
-            Terminal Teması
+            {t("settings.theme")}
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {(Object.entries(themePresets) as [ThemePreset, typeof themePresets.matrix][]).filter(([k]) => k !== "custom").map(([key, val]) => (
@@ -77,10 +179,7 @@ const Settings = () => {
                     : "border-border bg-card text-muted-foreground hover:border-muted-foreground"
                 }`}
               >
-                <div
-                  className="h-4 w-4 rounded-full shrink-0"
-                  style={{ background: `hsl(${val.primary})` }}
-                />
+                <div className="h-4 w-4 rounded-full shrink-0" style={{ background: `hsl(${val.primary})` }} />
                 {val.label}
               </button>
             ))}
@@ -90,7 +189,7 @@ const Settings = () => {
         {/* Custom Color */}
         <section className="space-y-3">
           <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
-            🎨 Özel Renk
+            🎨 {t("settings.customColor")}
           </h2>
           <div className="rounded-lg bg-card border border-border p-4 space-y-3">
             <div className="flex items-center gap-3">
@@ -101,44 +200,32 @@ const Settings = () => {
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2">
                   <Label className="text-[10px] text-muted-foreground w-6">H</Label>
-                  <Input
-                    type="range" min="0" max="360" value={customH}
-                    onChange={(e) => setCustomH(e.target.value)}
-                    className="h-2 p-0 border-0"
-                  />
+                  <Input type="range" min="0" max="360" value={customH} onChange={(e) => setCustomH(e.target.value)} className="h-2 p-0 border-0" />
                   <span className="text-[10px] text-muted-foreground w-8 text-right">{customH}°</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Label className="text-[10px] text-muted-foreground w-6">S</Label>
-                  <Input
-                    type="range" min="0" max="100" value={customS}
-                    onChange={(e) => setCustomS(e.target.value)}
-                    className="h-2 p-0 border-0"
-                  />
+                  <Input type="range" min="0" max="100" value={customS} onChange={(e) => setCustomS(e.target.value)} className="h-2 p-0 border-0" />
                   <span className="text-[10px] text-muted-foreground w-8 text-right">{customS}%</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Label className="text-[10px] text-muted-foreground w-6">L</Label>
-                  <Input
-                    type="range" min="0" max="100" value={customL}
-                    onChange={(e) => setCustomL(e.target.value)}
-                    className="h-2 p-0 border-0"
-                  />
+                  <Input type="range" min="0" max="100" value={customL} onChange={(e) => setCustomL(e.target.value)} className="h-2 p-0 border-0" />
                   <span className="text-[10px] text-muted-foreground w-8 text-right">{customL}%</span>
                 </div>
               </div>
             </div>
             <Button onClick={applyCustom} size="sm" className="w-full h-8 text-xs font-mono">
-              Özel Rengi Uygula
+              {t("settings.applyCustom")}
             </Button>
           </div>
         </section>
 
-        {/* Security Link */}
+        {/* Security */}
         <section className="space-y-3">
           <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
             <Shield className="h-4 w-4 text-primary" />
-            Güvenlik
+            {t("settings.security")}
           </h2>
           <button
             onClick={() => navigate("/security")}
@@ -146,12 +233,34 @@ const Settings = () => {
           >
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-muted-foreground" />
-              <span>2FA, Şifre, Oturumlar, Giriş Geçmişi</span>
+              <span>{t("settings.securityDesc")}</span>
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </button>
         </section>
+
+        {/* Private Key Export */}
+        {wallet && (
+          <section className="space-y-3">
+            <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
+              <Key className="h-4 w-4 text-destructive" />
+              {t("settings.privateKey")}
+            </h2>
+            <button
+              onClick={() => setExportKeyOpen(true)}
+              className="w-full flex items-center justify-between rounded-lg bg-card border border-destructive/20 p-3 text-xs font-mono text-foreground hover:border-destructive/50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Key className="h-4 w-4 text-destructive/70" />
+                <span>{t("settings.privateKeyDesc")}</span>
+              </div>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </section>
+        )}
       </div>
+
+      <ExportKeyDialog open={exportKeyOpen} onOpenChange={setExportKeyOpen} />
     </div>
   );
 };

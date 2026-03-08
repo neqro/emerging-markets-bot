@@ -158,5 +158,6 @@ export const useWallet = () => {
   return {
     wallet, trades, loading, tradeLoading,
     createWallet, fetchWallet, executeTrade, fetchTrades,
+    withdraw, exportPrivateKey,
   };
 };

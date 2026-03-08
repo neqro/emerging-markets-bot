@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Wallet as WalletIcon, Copy, Check, Plus, ArrowDownToLine, History, LogOut } from "lucide-react";
+import { Wallet as WalletIcon, Copy, Check, Plus, ArrowDownToLine, ArrowUpFromLine, History, LogOut, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PanelHeader } from "./PanelHeader";
 import { useWallet } from "@/hooks/useWallet";
 import { useAuth } from "@/hooks/useAuth";
 import { TradeDialog } from "./TradeDialog";
 import { AutoTradeSettings } from "./AutoTradeSettings";
+import { WithdrawDialog } from "./WithdrawDialog";
+import { ExportKeyDialog } from "./ExportKeyDialog";
 import { toast } from "@/components/ui/sonner";
 
 export const WalletPanel = () => {
@@ -14,6 +16,8 @@ export const WalletPanel = () => {
   const [copied, setCopied] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(false);
   const [tradeToken, setTradeToken] = useState<{ address: string; symbol: string } | null>(null);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [exportKeyOpen, setExportKeyOpen] = useState(false);
 
   const handleCopy = () => {
     if (wallet?.publicKey) {
@@ -66,7 +70,6 @@ export const WalletPanel = () => {
           </div>
         ) : (
           <>
-            {/* Auto Trade Status */}
             <AutoTradeSettings />
 
             {/* Balance Card */}
@@ -96,10 +99,25 @@ export const WalletPanel = () => {
               </p>
             </div>
 
-            {/* Quick Trade Button */}
-            <Button onClick={() => openQuickTrade()} className="w-full h-8 text-xs font-mono">
-              ⚡ Hızlı Trade
-            </Button>
+            {/* Action Buttons */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button onClick={() => openQuickTrade()} className="h-8 text-xs font-mono">
+                ⚡ Hızlı Trade
+              </Button>
+              <Button onClick={() => setWithdrawOpen(true)} variant="outline" className="h-8 text-xs font-mono">
+                <ArrowUpFromLine className="h-3.5 w-3.5 mr-1" />
+                SOL Çek
+              </Button>
+            </div>
+
+            {/* Security: Export Key */}
+            <button
+              onClick={() => setExportKeyOpen(true)}
+              className="w-full flex items-center gap-2 rounded-lg bg-secondary/30 border border-border p-2.5 text-[10px] text-muted-foreground hover:text-foreground hover:border-muted-foreground transition-colors"
+            >
+              <Key className="h-3.5 w-3.5" />
+              <span>Private Key Dışa Aktar</span>
+            </button>
 
             {/* Recent Trades */}
             <div className="space-y-1">
@@ -113,8 +131,12 @@ export const WalletPanel = () => {
                 trades.slice(0, 5).map((trade) => (
                   <div key={trade.id} className="flex items-center justify-between rounded-md bg-secondary/30 px-2 py-1.5 text-[10px]">
                     <div className="flex items-center gap-2">
-                      <span className={trade.order_type === 'buy' ? 'text-[hsl(var(--chart-up))]' : 'text-[hsl(var(--chart-down))]'}>
-                        {trade.order_type === 'buy' ? '↑ BUY' : '↓ SELL'}
+                      <span className={
+                        trade.order_type === 'buy' ? 'text-[hsl(var(--chart-up))]' :
+                        trade.order_type === 'withdraw' ? 'text-accent' :
+                        'text-[hsl(var(--chart-down))]'
+                      }>
+                        {trade.order_type === 'buy' ? '↑ BUY' : trade.order_type === 'withdraw' ? '↗ WD' : '↓ SELL'}
                       </span>
                       <span className="text-foreground font-mono">{trade.token_symbol || trade.token_address.slice(0, 6)}</span>
                     </div>
@@ -149,6 +171,8 @@ export const WalletPanel = () => {
       </div>
 
       <TradeDialog open={tradeOpen} onOpenChange={setTradeOpen} preselectedToken={tradeToken} />
+      <WithdrawDialog open={withdrawOpen} onOpenChange={setWithdrawOpen} />
+      <ExportKeyDialog open={exportKeyOpen} onOpenChange={setExportKeyOpen} />
     </>
   );
 };

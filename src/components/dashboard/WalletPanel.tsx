@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Wallet, Copy, Check, Plus, ArrowDownToLine, History, LogOut } from "lucide-react";
+import { Wallet as WalletIcon, Copy, Check, Plus, ArrowDownToLine, History, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PanelHeader } from "./PanelHeader";
 import { useWallet } from "@/hooks/useWallet";

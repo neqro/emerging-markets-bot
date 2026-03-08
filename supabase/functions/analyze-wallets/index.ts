@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encode as base64Encode, decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import nacl from "https://esm.sh/tweetnacl@1.0.3";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,6 +10,108 @@ const corsHeaders = {
 
 const HELIUS_API_KEY = Deno.env.get('HELIUS_API_KEY');
 const HELIUS_RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+
+// ===== Encryption / Base58 helpers =====
+function decryptKey(encryptedBase64: string, secret: string): Uint8Array {
+  const encrypted = base64Decode(encryptedBase64);
+  const keyBytes = new TextEncoder().encode(secret);
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return decrypted;
+}
+
+function normalizeSecretKey(raw: Uint8Array): Uint8Array {
+  if (raw.length === 64) return raw;
+  if (raw.length === 32) return nacl.sign.keyPair.fromSeed(raw).secretKey;
+  // PKCS8 Ed25519 (48 bytes)
+  if (raw.length === 48 && raw[0] === 0x30 && raw[14] === 0x04 && raw[15] === 0x20) {
+    return nacl.sign.keyPair.fromSeed(raw.slice(16, 48)).secretKey;
+  }
+  // Fallback ASN.1
+  for (let i = 0; i <= raw.length - 34; i++) {
+    if (raw[i] === 0x04 && raw[i + 1] === 0x20) {
+      return nacl.sign.keyPair.fromSeed(raw.slice(i + 2, i + 34)).secretKey;
+    }
+  }
+  throw new Error(`Unsupported key format (${raw.length} bytes)`);
+}
+
+// ===== Jupiter swap helper (uses api.jup.ag + local signing) =====
+async function executeJupiterSwap(
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number,
+  secretKey: Uint8Array,
+  publicKeyBase58: string,
+  slippageBps: number = 300,
+): Promise<{ success: boolean; txSignature?: string; outAmount?: number; error?: string }> {
+  try {
+    // 1. Get quote from Jupiter (new API endpoint)
+    const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=${slippageBps}`;
+    console.log(`📡 Jupiter quote: ${inputMint.slice(0, 8)}→${outputMint.slice(0, 8)} | ${amountLamports} lamports`);
+    
+    const quoteRes = await fetch(quoteUrl);
+    const quote = await quoteRes.json();
+    if (quote.error) return { success: false, error: `Quote error: ${quote.error}` };
+
+    // 2. Get swap transaction
+    const swapRes = await fetch('https://api.jup.ag/swap/v1/swap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        quoteResponse: quote,
+        userPublicKey: publicKeyBase58,
+        wrapAndUnwrapSol: true,
+        dynamicComputeUnitLimit: true,
+        prioritizationFeeLamports: 'auto',
+      }),
+    });
+    const swapData = await swapRes.json();
+    if (swapData.error) return { success: false, error: `Swap error: ${swapData.error}` };
+
+    // 3. Deserialize, sign and send
+    const txBytes = base64Decode(swapData.swapTransaction);
+    
+    // The transaction from Jupiter is a VersionedTransaction serialized as base64
+    // We need to sign it and send it
+    // Find signature placeholder (first 64 bytes after compact array prefix)
+    // For a single-signer tx: [1, <64 zero bytes>, <message>]
+    const signatureOffset = 1; // after compact-u16 for 1 signature
+    const message = txBytes.slice(signatureOffset + 64);
+    const signature = nacl.sign.detached(message, secretKey);
+    
+    // Replace the zero signature with our real signature
+    const signedTx = new Uint8Array(txBytes.length);
+    signedTx.set(txBytes);
+    signedTx.set(signature, signatureOffset);
+
+    const signedTxBase64 = base64Encode(signedTx);
+
+    // 4. Send via Helius RPC (always reachable)
+    const sendRes = await fetch(HELIUS_RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1,
+        method: 'sendTransaction',
+        params: [signedTxBase64, { encoding: 'base64', skipPreflight: true, maxRetries: 3 }],
+      }),
+    });
+    const sendData = await sendRes.json();
+
+    if (sendData.error) return { success: false, error: `RPC error: ${sendData.error.message}` };
+
+    return {
+      success: true,
+      txSignature: sendData.result,
+      outAmount: quote.outAmount ? Number(quote.outAmount) : undefined,
+    };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+}
 
 // Gerçek Solana top whale/smart money cüzdanları
 const TOP_WHALE_WALLETS = [
@@ -468,7 +572,7 @@ serve(async (req) => {
                 continue;
               }
 
-              // Kullanıcının cüzdanını al
+              // Kullanıcının cüzdanını al + secret key decrypt
               const { data: wallet } = await supabase
                 .from('user_wallets')
                 .select('*')
@@ -477,6 +581,17 @@ serve(async (req) => {
 
               if (!wallet || wallet.sol_balance < 0.01) {
                 console.log(`⏸️ ${settings.user_id.slice(0, 8)}: Yetersiz bakiye (${wallet?.sol_balance || 0} SOL)`);
+                continue;
+              }
+
+              // Decrypt secret key for signing
+              const encryptionSecret = Deno.env.get('WALLET_ENCRYPTION_KEY') || supabaseKey.slice(0, 32);
+              let walletSecretKey: Uint8Array;
+              try {
+                const rawKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
+                walletSecretKey = normalizeSecretKey(rawKey);
+              } catch (keyErr) {
+                console.error(`❌ ${settings.user_id.slice(0, 8)}: Key decrypt hata:`, keyErr);
                 continue;
               }
 
@@ -512,43 +627,15 @@ serve(async (req) => {
                   console.log(`🟢 AUTO BUY: ${signal.token_symbol} | ${tradeAmount} SOL | Güven: ${signal.confidence_score}%`);
 
                   // Blockchain'de swap yap, SADECE başarılıysa kaydet
-                  try {
-                    const SOL_MINT = 'So11111111111111111111111111111111111111112';
-                    const amountLamports = Math.floor(tradeAmount * 1e9);
+                  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+                  const amountLamports = Math.floor(tradeAmount * 1e9);
 
-                    const quoteRes = await fetch(
-                      `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${signal.token_address}&amount=${amountLamports}&slippageBps=300`
-                    );
-                    const quote = await quoteRes.json();
-                    if (quote.error) throw new Error(quote.error);
+                  const buyResult = await executeJupiterSwap(
+                    SOL_MINT, signal.token_address, amountLamports,
+                    walletSecretKey, wallet.public_key, 300
+                  );
 
-                    const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        quoteResponse: quote,
-                        userPublicKey: wallet.public_key,
-                        wrapAndUnwrapSol: true,
-                        dynamicComputeUnitLimit: true,
-                        prioritizationFeeLamports: 'auto',
-                      }),
-                    });
-                    const swapData = await swapRes.json();
-                    if (swapData.error) throw new Error(swapData.error);
-
-                    const sendRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        jsonrpc: '2.0', id: 1,
-                        method: 'sendTransaction',
-                        params: [swapData.swapTransaction, { encoding: 'base64' }],
-                      }),
-                    });
-                    const sendData = await sendRes.json();
-                    if (sendData.error) throw new Error(sendData.error.message);
-
-                    // ✅ İşlem blockchain'de başarılı — şimdi kaydet
+                  if (buyResult.success && buyResult.txSignature) {
                     await supabase.from('trade_orders').insert({
                       user_id: settings.user_id,
                       wallet_id: wallet.id,
@@ -557,11 +644,10 @@ serve(async (req) => {
                       order_type: 'buy',
                       amount_sol: tradeAmount,
                       status: 'completed',
-                      tx_signature: sendData.result,
-                      price_at_trade: quote.outAmount ? Number(quote.outAmount) / 1e6 : null,
+                      tx_signature: buyResult.txSignature,
+                      price_at_trade: buyResult.outAmount ? buyResult.outAmount / 1e6 : null,
                     });
 
-                    // Bakiye ve günlük kullanım güncelle
                     settings.daily_sol_used += tradeAmount;
                     wallet.sol_balance -= tradeAmount;
                     await supabase.from('user_wallets').update({ sol_balance: Math.max(0, wallet.sol_balance) }).eq('id', wallet.id);
@@ -569,12 +655,11 @@ serve(async (req) => {
 
                     openTokens.add(signal.token_address);
                     autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'completed' });
-                    console.log(`✅ AUTO BUY tamamlandı: ${signal.token_symbol} | ${tradeAmount} SOL | tx: ${sendData.result}`);
-
-                  } catch (tradeErr) {
-                    // ❌ Başarısız — veritabanına HİÇBİR ŞEY kaydetme
-                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'failed', error: String(tradeErr) });
-                    console.error(`❌ AUTO BUY hata (kayıt oluşturulmadı): ${signal.token_symbol}:`, tradeErr);
+                    console.log(`✅ AUTO BUY tamamlandı: ${signal.token_symbol} | ${tradeAmount} SOL | tx: ${buyResult.txSignature}`);
+                  } else {
+                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'failed', error: buyResult.error });
+                    console.error(`❌ AUTO BUY hata: ${signal.token_symbol}: ${buyResult.error}`);
+                  }
                   }
                 }
 
@@ -599,43 +684,15 @@ serve(async (req) => {
 
                   console.log(`🔴 AUTO SELL: ${signal.token_symbol} | ~${sellAmount} SOL | Güven: ${signal.confidence_score}%`);
 
-                  try {
-                    const SOL_MINT = 'So11111111111111111111111111111111111111112';
-                    const amountLamports = Math.floor(sellAmount * 1e9);
+                  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+                  const amountLamports = Math.floor(sellAmount * 1e9);
 
-                    const quoteRes = await fetch(
-                      `https://quote-api.jup.ag/v6/quote?inputMint=${signal.token_address}&outputMint=${SOL_MINT}&amount=${amountLamports}&slippageBps=500`
-                    );
-                    const quote = await quoteRes.json();
-                    if (quote.error) throw new Error(quote.error);
+                  const sellResult = await executeJupiterSwap(
+                    signal.token_address, SOL_MINT, amountLamports,
+                    walletSecretKey, wallet.public_key, 500
+                  );
 
-                    const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        quoteResponse: quote,
-                        userPublicKey: wallet.public_key,
-                        wrapAndUnwrapSol: true,
-                        dynamicComputeUnitLimit: true,
-                        prioritizationFeeLamports: 'auto',
-                      }),
-                    });
-                    const swapData = await swapRes.json();
-                    if (swapData.error) throw new Error(swapData.error);
-
-                    const sendRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        jsonrpc: '2.0', id: 1,
-                        method: 'sendTransaction',
-                        params: [swapData.swapTransaction, { encoding: 'base64' }],
-                      }),
-                    });
-                    const sendData = await sendRes.json();
-                    if (sendData.error) throw new Error(sendData.error.message);
-
-                    // ✅ İşlem blockchain'de başarılı — şimdi kaydet
+                  if (sellResult.success && sellResult.txSignature) {
                     await supabase.from('trade_orders').insert({
                       user_id: settings.user_id,
                       wallet_id: wallet.id,
@@ -644,7 +701,7 @@ serve(async (req) => {
                       order_type: 'sell',
                       amount_sol: sellAmount,
                       status: 'completed',
-                      tx_signature: sendData.result,
+                      tx_signature: sellResult.txSignature,
                     });
 
                     wallet.sol_balance += sellAmount;
@@ -652,12 +709,10 @@ serve(async (req) => {
 
                     openTokens.delete(signal.token_address);
                     autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, amount: sellAmount, status: 'completed' });
-                    console.log(`✅ AUTO SELL tamamlandı: ${signal.token_symbol} | tx: ${sendData.result}`);
-
-                  } catch (tradeErr) {
-                    // ❌ Başarısız — veritabanına HİÇBİR ŞEY kaydetme
-                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, status: 'failed', error: String(tradeErr) });
-                    console.error(`❌ AUTO SELL hata (kayıt oluşturulmadı): ${signal.token_symbol}:`, tradeErr);
+                    console.log(`✅ AUTO SELL tamamlandı: ${signal.token_symbol} | tx: ${sellResult.txSignature}`);
+                  } else {
+                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, status: 'failed', error: sellResult.error });
+                    console.error(`❌ AUTO SELL hata: ${signal.token_symbol}: ${sellResult.error}`);
                   }
                 }
               }

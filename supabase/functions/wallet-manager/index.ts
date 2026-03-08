@@ -449,7 +449,7 @@ serve(async (req) => {
 
       try {
         const secretKeyBytes = decryptKey(wallet.encrypted_private_key, encryptionSecret);
-        const privateKey = await crypto.subtle.importKey("pkcs8", secretKeyBytes, "Ed25519", false, ["sign"]);
+        const privateKey = await crypto.subtle.importKey("pkcs8", secretKeyBytes.buffer, "Ed25519", false, ["sign"]) as CryptoKey;
         
         const heliusKey = Deno.env.get('HELIUS_API_KEY');
         const amountLamports = Math.floor(amountSol * 1e9);

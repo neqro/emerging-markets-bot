@@ -285,9 +285,10 @@ serve(async (req) => {
         });
       }
 
-      // Decrypt and return as base58
-      const decryptedKeypair = decryptKey(wallet.encrypted_private_key, encryptionSecret);
-      const privateKeyBase58 = base58Encode(decryptedKeypair);
+      // Decrypt, normalize and return as base58 (always 64-byte Solana secret key)
+      const decryptedKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
+      const normalizedKeypair = normalizeSecretKey(decryptedKey);
+      const privateKeyBase58 = base58Encode(normalizedKeypair);
 
       return new Response(JSON.stringify({
         success: true,

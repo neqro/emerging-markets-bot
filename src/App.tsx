@@ -40,6 +40,7 @@ const App = () => (
     <ThemeProvider>
       <LanguageProvider>
         <TooltipProvider>
+          <FarcasterReady />
           <Toaster />
           <Sonner />
           <BrowserRouter>

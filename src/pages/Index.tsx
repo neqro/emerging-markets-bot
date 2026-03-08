@@ -8,9 +8,11 @@ import { SignalsPanel } from "@/components/dashboard/SignalsPanel";
 import { WalletTrackerPanel } from "@/components/dashboard/WalletTrackerPanel";
 import { WalletPanel } from "@/components/dashboard/WalletPanel";
 import { PositionsPanel } from "@/components/dashboard/PositionsPanel";
+import { useAnalyzerScheduler } from "@/hooks/useAnalyzerScheduler";
 
 const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
+  useAnalyzerScheduler(); // Triggers analyze-wallets every 5 min
 
   return (
     <div className="flex flex-col h-screen bg-background terminal-grid">

@@ -1,11 +1,14 @@
 import { Eye, Wallet, Loader2 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { PanelHeader } from "./PanelHeader";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { timeAgo } from "@/lib/dexscreener";
 
 export const WalletTrackerPanel = () => {
+  const queryClient = useQueryClient();
+
   const { data: wallets, isLoading: walletsLoading } = useQuery({
     queryKey: ["tracked-wallets"],
     queryFn: async () => {
@@ -33,6 +36,29 @@ export const WalletTrackerPanel = () => {
     },
     refetchInterval: 15000,
   });
+
+  // Realtime subscriptions
+  useEffect(() => {
+    const channel = supabase
+      .channel("wallet-tracker-realtime")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "wallet_transactions",
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ["wallet-transactions"] });
+      })
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "tracked_wallets",
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ["tracked-wallets"] });
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
 
   const isLoading = walletsLoading || txLoading;
 

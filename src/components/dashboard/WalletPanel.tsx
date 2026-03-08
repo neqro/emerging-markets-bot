@@ -40,7 +40,7 @@ export const WalletPanel = () => {
   return (
     <>
       <PanelHeader
-        icon={<Wallet className="h-3.5 w-3.5" />}
+        icon={WalletIcon}
         title="Cüzdan"
         badge={wallet ? `${wallet.balance.toFixed(4)} SOL` : undefined}
       />

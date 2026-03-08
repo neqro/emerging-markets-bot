@@ -1,6 +1,7 @@
 import { Bot, Search, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useNavigate } from "react-router-dom";
 
 interface HeaderProps {
   searchQuery: string;
@@ -8,6 +9,8 @@ interface HeaderProps {
 }
 
 export const Header = ({ searchQuery, onSearchChange }: HeaderProps) => {
+  const navigate = useNavigate();
+
   return (
     <header className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-border">
       <div className="flex items-center gap-2 md:gap-3">
@@ -34,7 +37,7 @@ export const Header = ({ searchQuery, onSearchChange }: HeaderProps) => {
             className="pl-9 w-40 md:w-64 h-8 text-xs bg-secondary border-border"
           />
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8">
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate("/settings")}>
           <Settings className="h-4 w-4 text-muted-foreground" />
         </Button>
       </div>

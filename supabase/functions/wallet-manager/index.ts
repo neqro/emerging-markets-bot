@@ -44,7 +44,7 @@ async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: 
   return { publicKey: publicKeyBase58, secretKey: secretKeyBytes };
 }
 
-// Base58 encoding (Solana standard)
+// Base58 encoding/decoding (Solana standard)
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function base58Encode(bytes: Uint8Array): string {
   const digits = [0];
@@ -69,6 +69,28 @@ function base58Encode(bytes: Uint8Array): string {
     result += BASE58_ALPHABET[digits[i]];
   }
   return result;
+}
+
+function base58Decode(str: string): Uint8Array {
+  const digits = [0];
+  for (const char of str) {
+    let carry = BASE58_ALPHABET.indexOf(char);
+    if (carry === -1) throw new Error('Invalid base58 character');
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] * 58;
+      digits[j] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      digits.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  const result = new Uint8Array(digits);
+  for (let i = 0; i < str.length && str[i] === '1'; i++) {
+    result[i] = 0;
+  }
+  return result.reverse();
 }
 
 serve(async (req) => {

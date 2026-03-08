@@ -415,10 +415,272 @@ serve(async (req) => {
 
       console.log(`🏁 Tarama tamamlandı: ${results.length} token analiz edildi`);
 
+      // ===== OTOMATİK TRADE ÇALIŞTIR =====
+      let autoTradeResults: any[] = [];
+      try {
+        // Auto-trade ayarları aktif olan kullanıcıları bul
+        const { data: activeSettings } = await supabase
+          .from('auto_trade_settings')
+          .select('*')
+          .eq('is_enabled', true);
+
+        if (activeSettings && activeSettings.length > 0) {
+          console.log(`🤖 ${activeSettings.length} kullanıcı için auto-trade kontrol ediliyor...`);
+
+          // Aktif sinyalleri al
+          const { data: activeSignals } = await supabase
+            .from('bot_signals')
+            .select('*')
+            .eq('is_active', true)
+            .order('confidence_score', { ascending: false });
+
+          for (const settings of activeSettings) {
+            try {
+              // Günlük limit resetle (24 saat geçtiyse)
+              const lastReset = new Date(settings.daily_reset_at);
+              const now = new Date();
+              if (now.getTime() - lastReset.getTime() > 24 * 60 * 60 * 1000) {
+                await supabase
+                  .from('auto_trade_settings')
+                  .update({ daily_sol_used: 0, daily_reset_at: now.toISOString() })
+                  .eq('id', settings.id);
+                settings.daily_sol_used = 0;
+              }
+
+              // Günlük limit kontrolü
+              if (settings.daily_sol_used >= settings.max_daily_sol) {
+                console.log(`⏸️ ${settings.user_id.slice(0, 8)}: Günlük limit doldu (${settings.daily_sol_used}/${settings.max_daily_sol} SOL)`);
+                continue;
+              }
+
+              // Kullanıcının cüzdanını al
+              const { data: wallet } = await supabase
+                .from('user_wallets')
+                .select('*')
+                .eq('user_id', settings.user_id)
+                .single();
+
+              if (!wallet || wallet.sol_balance < 0.01) {
+                console.log(`⏸️ ${settings.user_id.slice(0, 8)}: Yetersiz bakiye (${wallet?.sol_balance || 0} SOL)`);
+                continue;
+              }
+
+              // Mevcut açık pozisyonları kontrol et (tamamlanmış buy'lar sell edilmemiş)
+              const { data: openPositions } = await supabase
+                .from('trade_orders')
+                .select('token_address')
+                .eq('user_id', settings.user_id)
+                .eq('order_type', 'buy')
+                .eq('status', 'completed');
+              
+              const openTokens = new Set((openPositions || []).map(p => p.token_address));
+
+              for (const signal of (activeSignals || [])) {
+                // Günlük limit kontrolü (her trade sonrası)
+                if (settings.daily_sol_used >= settings.max_daily_sol) break;
+
+                // === AUTO BUY ===
+                if (signal.signal_type === 'buy' && settings.auto_buy_enabled) {
+                  if (signal.confidence_score < settings.min_confidence_buy) continue;
+                  if (openTokens.size >= settings.max_open_positions) continue;
+                  if (openTokens.has(signal.token_address)) continue; // Zaten pozisyon var
+                  if (wallet.sol_balance < settings.max_sol_per_trade) continue;
+
+                  const tradeAmount = Math.min(
+                    settings.max_sol_per_trade,
+                    settings.max_daily_sol - settings.daily_sol_used,
+                    wallet.sol_balance * 0.9 // %90'dan fazla kullanma
+                  );
+
+                  if (tradeAmount < 0.005) continue;
+
+                  console.log(`🟢 AUTO BUY: ${signal.token_symbol} | ${tradeAmount} SOL | Güven: ${signal.confidence_score}%`);
+
+                  // Trade kaydı oluştur
+                  const { data: order } = await supabase
+                    .from('trade_orders')
+                    .insert({
+                      user_id: settings.user_id,
+                      wallet_id: wallet.id,
+                      token_address: signal.token_address,
+                      token_symbol: signal.token_symbol,
+                      order_type: 'buy',
+                      amount_sol: tradeAmount,
+                      status: 'executing',
+                    })
+                    .select()
+                    .single();
+
+                  // Jupiter swap çağır
+                  try {
+                    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+                    const amountLamports = Math.floor(tradeAmount * 1e9);
+
+                    const quoteRes = await fetch(
+                      `https://quote-api.jup.ag/v6/quote?inputMint=${SOL_MINT}&outputMint=${signal.token_address}&amount=${amountLamports}&slippageBps=300`
+                    );
+                    const quote = await quoteRes.json();
+
+                    if (quote.error) throw new Error(quote.error);
+
+                    const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        quoteResponse: quote,
+                        userPublicKey: wallet.public_key,
+                        wrapAndUnwrapSol: true,
+                        dynamicComputeUnitLimit: true,
+                        prioritizationFeeLamports: 'auto',
+                      }),
+                    });
+                    const swapData = await swapRes.json();
+
+                    if (swapData.error) throw new Error(swapData.error);
+
+                    // İşlemi gönder
+                    const sendRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        jsonrpc: '2.0', id: 1,
+                        method: 'sendTransaction',
+                        params: [swapData.swapTransaction, { encoding: 'base64' }],
+                      }),
+                    });
+                    const sendData = await sendRes.json();
+
+                    if (sendData.error) throw new Error(sendData.error.message);
+
+                    await supabase.from('trade_orders').update({
+                      status: 'completed',
+                      tx_signature: sendData.result,
+                      price_at_trade: quote.outAmount ? Number(quote.outAmount) / 1e6 : null,
+                    }).eq('id', order!.id);
+
+                    // Bakiye ve günlük kullanım güncelle
+                    settings.daily_sol_used += tradeAmount;
+                    wallet.sol_balance -= tradeAmount;
+                    await supabase.from('user_wallets').update({ sol_balance: Math.max(0, wallet.sol_balance) }).eq('id', wallet.id);
+                    await supabase.from('auto_trade_settings').update({ daily_sol_used: settings.daily_sol_used }).eq('id', settings.id);
+
+                    openTokens.add(signal.token_address);
+                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'completed' });
+                    console.log(`✅ AUTO BUY tamamlandı: ${signal.token_symbol} | ${tradeAmount} SOL`);
+
+                  } catch (tradeErr) {
+                    await supabase.from('trade_orders').update({ status: 'failed', error_message: String(tradeErr) }).eq('id', order!.id);
+                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'failed', error: String(tradeErr) });
+                    console.error(`❌ AUTO BUY hata: ${signal.token_symbol}:`, tradeErr);
+                  }
+                }
+
+                // === AUTO SELL ===
+                if (signal.signal_type === 'sell' && settings.auto_sell_enabled) {
+                  if (signal.confidence_score < settings.min_confidence_sell) continue;
+                  if (!openTokens.has(signal.token_address)) continue; // Pozisyon yoksa satma
+
+                  // Bu token'dan ne kadar aldığımızı bul
+                  const { data: buyOrder } = await supabase
+                    .from('trade_orders')
+                    .select('amount_sol')
+                    .eq('user_id', settings.user_id)
+                    .eq('token_address', signal.token_address)
+                    .eq('order_type', 'buy')
+                    .eq('status', 'completed')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .single();
+
+                  const sellAmount = buyOrder?.amount_sol || settings.max_sol_per_trade;
+
+                  console.log(`🔴 AUTO SELL: ${signal.token_symbol} | ~${sellAmount} SOL | Güven: ${signal.confidence_score}%`);
+
+                  const { data: sellOrder } = await supabase
+                    .from('trade_orders')
+                    .insert({
+                      user_id: settings.user_id,
+                      wallet_id: wallet.id,
+                      token_address: signal.token_address,
+                      token_symbol: signal.token_symbol,
+                      order_type: 'sell',
+                      amount_sol: sellAmount,
+                      status: 'executing',
+                    })
+                    .select()
+                    .single();
+
+                  try {
+                    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+                    const amountLamports = Math.floor(sellAmount * 1e9);
+
+                    const quoteRes = await fetch(
+                      `https://quote-api.jup.ag/v6/quote?inputMint=${signal.token_address}&outputMint=${SOL_MINT}&amount=${amountLamports}&slippageBps=500`
+                    );
+                    const quote = await quoteRes.json();
+
+                    if (quote.error) throw new Error(quote.error);
+
+                    const swapRes = await fetch('https://quote-api.jup.ag/v6/swap', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        quoteResponse: quote,
+                        userPublicKey: wallet.public_key,
+                        wrapAndUnwrapSol: true,
+                        dynamicComputeUnitLimit: true,
+                        prioritizationFeeLamports: 'auto',
+                      }),
+                    });
+                    const swapData = await swapRes.json();
+                    if (swapData.error) throw new Error(swapData.error);
+
+                    const sendRes = await fetch(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        jsonrpc: '2.0', id: 1,
+                        method: 'sendTransaction',
+                        params: [swapData.swapTransaction, { encoding: 'base64' }],
+                      }),
+                    });
+                    const sendData = await sendRes.json();
+                    if (sendData.error) throw new Error(sendData.error.message);
+
+                    await supabase.from('trade_orders').update({
+                      status: 'completed',
+                      tx_signature: sendData.result,
+                    }).eq('id', sellOrder!.id);
+
+                    wallet.sol_balance += sellAmount;
+                    await supabase.from('user_wallets').update({ sol_balance: wallet.sol_balance }).eq('id', wallet.id);
+
+                    openTokens.delete(signal.token_address);
+                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, amount: sellAmount, status: 'completed' });
+                    console.log(`✅ AUTO SELL tamamlandı: ${signal.token_symbol}`);
+
+                  } catch (tradeErr) {
+                    await supabase.from('trade_orders').update({ status: 'failed', error_message: String(tradeErr) }).eq('id', sellOrder!.id);
+                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, status: 'failed', error: String(tradeErr) });
+                    console.error(`❌ AUTO SELL hata: ${signal.token_symbol}:`, tradeErr);
+                  }
+                }
+              }
+            } catch (userErr) {
+              console.error(`❌ Auto-trade kullanıcı hatası ${settings.user_id.slice(0, 8)}:`, userErr);
+            }
+          }
+          console.log(`🤖 Auto-trade tamamlandı: ${autoTradeResults.length} işlem`);
+        }
+      } catch (autoErr) {
+        console.error('❌ Auto-trade genel hata:', autoErr);
+      }
+
       return new Response(JSON.stringify({
         success: true,
         scannedCount: results.length,
         results,
+        autoTrades: autoTradeResults,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

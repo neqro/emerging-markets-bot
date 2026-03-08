@@ -5,6 +5,7 @@ import { PanelHeader } from "./PanelHeader";
 import { useWallet } from "@/hooks/useWallet";
 import { useAuth } from "@/hooks/useAuth";
 import { TradeDialog } from "./TradeDialog";
+import { AutoTradeSettings } from "./AutoTradeSettings";
 import { toast } from "@/components/ui/sonner";
 
 export const WalletPanel = () => {
@@ -65,6 +66,9 @@ export const WalletPanel = () => {
           </div>
         ) : (
           <>
+            {/* Auto Trade Status */}
+            <AutoTradeSettings />
+
             {/* Balance Card */}
             <div className="rounded-lg bg-secondary/50 border border-border p-3">
               <div className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Bakiye</div>

@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encode as base64Encode, decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
+import nacl from "https://esm.sh/tweetnacl@1.0.3";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,6 +10,108 @@ const corsHeaders = {
 
 const HELIUS_API_KEY = Deno.env.get('HELIUS_API_KEY');
 const HELIUS_RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+
+// ===== Encryption / Base58 helpers =====
+function decryptKey(encryptedBase64: string, secret: string): Uint8Array {
+  const encrypted = base64Decode(encryptedBase64);
+  const keyBytes = new TextEncoder().encode(secret);
+  const decrypted = new Uint8Array(encrypted.length);
+  for (let i = 0; i < encrypted.length; i++) {
+    decrypted[i] = encrypted[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return decrypted;
+}
+
+function normalizeSecretKey(raw: Uint8Array): Uint8Array {
+  if (raw.length === 64) return raw;
+  if (raw.length === 32) return nacl.sign.keyPair.fromSeed(raw).secretKey;
+  // PKCS8 Ed25519 (48 bytes)
+  if (raw.length === 48 && raw[0] === 0x30 && raw[14] === 0x04 && raw[15] === 0x20) {
+    return nacl.sign.keyPair.fromSeed(raw.slice(16, 48)).secretKey;
+  }
+  // Fallback ASN.1
+  for (let i = 0; i <= raw.length - 34; i++) {
+    if (raw[i] === 0x04 && raw[i + 1] === 0x20) {
+      return nacl.sign.keyPair.fromSeed(raw.slice(i + 2, i + 34)).secretKey;
+    }
+  }
+  throw new Error(`Unsupported key format (${raw.length} bytes)`);
+}
+
+// ===== Jupiter swap helper (uses api.jup.ag + local signing) =====
+async function executeJupiterSwap(
+  inputMint: string,
+  outputMint: string,
+  amountLamports: number,
+  secretKey: Uint8Array,
+  publicKeyBase58: string,
+  slippageBps: number = 300,
+): Promise<{ success: boolean; txSignature?: string; outAmount?: number; error?: string }> {
+  try {
+    // 1. Get quote from Jupiter (new API endpoint)
+    const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=${slippageBps}`;
+    console.log(`📡 Jupiter quote: ${inputMint.slice(0, 8)}→${outputMint.slice(0, 8)} | ${amountLamports} lamports`);
+    
+    const quoteRes = await fetch(quoteUrl);
+    const quote = await quoteRes.json();
+    if (quote.error) return { success: false, error: `Quote error: ${quote.error}` };
+
+    // 2. Get swap transaction
+    const swapRes = await fetch('https://api.jup.ag/swap/v1/swap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        quoteResponse: quote,
+        userPublicKey: publicKeyBase58,
+        wrapAndUnwrapSol: true,
+        dynamicComputeUnitLimit: true,
+        prioritizationFeeLamports: 'auto',
+      }),
+    });
+    const swapData = await swapRes.json();
+    if (swapData.error) return { success: false, error: `Swap error: ${swapData.error}` };
+
+    // 3. Deserialize, sign and send
+    const txBytes = base64Decode(swapData.swapTransaction);
+    
+    // The transaction from Jupiter is a VersionedTransaction serialized as base64
+    // We need to sign it and send it
+    // Find signature placeholder (first 64 bytes after compact array prefix)
+    // For a single-signer tx: [1, <64 zero bytes>, <message>]
+    const signatureOffset = 1; // after compact-u16 for 1 signature
+    const message = txBytes.slice(signatureOffset + 64);
+    const signature = nacl.sign.detached(message, secretKey);
+    
+    // Replace the zero signature with our real signature
+    const signedTx = new Uint8Array(txBytes.length);
+    signedTx.set(txBytes);
+    signedTx.set(signature, signatureOffset);
+
+    const signedTxBase64 = base64Encode(signedTx);
+
+    // 4. Send via Helius RPC (always reachable)
+    const sendRes = await fetch(HELIUS_RPC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1,
+        method: 'sendTransaction',
+        params: [signedTxBase64, { encoding: 'base64', skipPreflight: true, maxRetries: 3 }],
+      }),
+    });
+    const sendData = await sendRes.json();
+
+    if (sendData.error) return { success: false, error: `RPC error: ${sendData.error.message}` };
+
+    return {
+      success: true,
+      txSignature: sendData.result,
+      outAmount: quote.outAmount ? Number(quote.outAmount) : undefined,
+    };
+  } catch (err) {
+    return { success: false, error: String(err) };
+  }
+}
 
 // Gerçek Solana top whale/smart money cüzdanları
 const TOP_WHALE_WALLETS = [

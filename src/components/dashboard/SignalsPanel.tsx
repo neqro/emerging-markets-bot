@@ -1,4 +1,4 @@
-import { Radio, ArrowUpRight, ArrowDownRight, Minus, Loader2 } from "lucide-react";
+import { Radio, ArrowUpRight, ArrowDownRight, Minus, Loader2, ExternalLink } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { PanelHeader } from "./PanelHeader";

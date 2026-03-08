@@ -16,7 +16,7 @@ export const Header = ({ searchQuery, onSearchChange }: HeaderProps) => {
         </div>
         <div>
           <h1 className="text-lg font-display font-bold tracking-tight text-foreground">
-            BaseBot
+            SolBot
           </h1>
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
             Autonomous Trading Terminal

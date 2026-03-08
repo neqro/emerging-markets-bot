@@ -1,4 +1,4 @@
-import { Radio, ArrowUpRight, ArrowDownRight, Minus, Loader2 } from "lucide-react";
+import { Radio, ArrowUpRight, ArrowDownRight, Minus, Loader2, ExternalLink } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { PanelHeader } from "./PanelHeader";
@@ -73,9 +73,16 @@ export const SignalsPanel = () => {
                     <span className="text-xs font-display font-semibold uppercase">
                       {signal.signal_type}
                     </span>
-                    <span className="text-xs font-mono font-bold text-foreground">
+                    <a
+                      href={`https://dexscreener.com/solana/${signal.token_address}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-mono font-bold text-foreground hover:text-primary transition-colors inline-flex items-center gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {signal.token_symbol || signal.token_address.slice(0, 6) + "..."}
-                    </span>
+                      <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+                    </a>
                   </div>
                   <span className="text-[10px] font-mono text-muted-foreground">
                     {timeAgo(new Date(signal.created_at).getTime())}

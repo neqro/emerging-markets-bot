@@ -1,5 +1,6 @@
 import { Radio, ArrowUpRight, ArrowDownRight, Minus, Loader2 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { PanelHeader } from "./PanelHeader";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
@@ -18,6 +19,8 @@ const SignalIcon = ({ type }: { type: string }) => {
 };
 
 export const SignalsPanel = () => {
+  const queryClient = useQueryClient();
+
   const { data: signals, isLoading } = useQuery({
     queryKey: ["bot-signals"],
     queryFn: async () => {
@@ -32,6 +35,22 @@ export const SignalsPanel = () => {
     },
     refetchInterval: 15000,
   });
+
+  // Realtime subscription for instant updates
+  useEffect(() => {
+    const channel = supabase
+      .channel("signals-realtime")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "bot_signals",
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ["bot-signals"] });
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
 
   return (
     <div className="flex flex-col h-full">

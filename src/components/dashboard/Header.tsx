@@ -1,12 +1,10 @@
-import { Bot, Search, Settings, Wallet } from "lucide-react";
+import { Bot, Search, Settings } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useLanguage } from "@/hooks/useLanguage";
 import { useProfile } from "@/hooks/useProfile";
 import { User } from "lucide-react";
-import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 
 interface HeaderProps {
   searchQuery: string;
@@ -17,7 +15,6 @@ export const Header = ({ searchQuery, onSearchChange }: HeaderProps) => {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const { profile } = useProfile();
-  const { connected } = useWallet();
 
   return (
     <header className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-border">
@@ -42,11 +39,6 @@ export const Header = ({ searchQuery, onSearchChange }: HeaderProps) => {
             onChange={(e) => onSearchChange(e.target.value)}
             className="pl-9 w-40 md:w-64 h-8 text-xs bg-secondary border-border"
           />
-        </div>
-
-        {/* Solana Wallet Connect */}
-        <div className="[&_.wallet-adapter-button]:!h-8 [&_.wallet-adapter-button]:!text-xs [&_.wallet-adapter-button]:!rounded-lg [&_.wallet-adapter-button]:!bg-primary/10 [&_.wallet-adapter-button]:!text-primary [&_.wallet-adapter-button]:!border [&_.wallet-adapter-button]:!border-primary/30 [&_.wallet-adapter-button]:!font-mono [&_.wallet-adapter-button]:!px-3 hover:[&_.wallet-adapter-button]:!bg-primary/20">
-          <WalletMultiButton />
         </div>
 
         {/* Profile avatar */}

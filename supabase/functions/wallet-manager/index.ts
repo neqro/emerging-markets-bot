@@ -77,6 +77,40 @@ function base58Decode(str: string): Uint8Array {
   return result.reverse();
 }
 
+function normalizeSecretKey(raw: Uint8Array): Uint8Array {
+  // Standard Solana/tweetnacl secret key (64 bytes)
+  if (raw.length === 64) return raw;
+
+  // Seed-only key (32 bytes)
+  if (raw.length === 32) {
+    return nacl.sign.keyPair.fromSeed(raw).secretKey;
+  }
+
+  // Ed25519 PKCS8 (48 bytes): 16-byte prefix + 32-byte seed
+  const pkcs8Ed25519Prefix = new Uint8Array([
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+    0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+  ]);
+
+  if (raw.length === 48) {
+    const prefixMatches = pkcs8Ed25519Prefix.every((b, i) => raw[i] === b);
+    if (prefixMatches) {
+      const seed = raw.slice(16, 48);
+      return nacl.sign.keyPair.fromSeed(seed).secretKey;
+    }
+  }
+
+  // Fallback: detect ASN.1 OCTET STRING marker (04 20) and use following 32 bytes as seed
+  for (let i = 0; i <= raw.length - 34; i++) {
+    if (raw[i] === 0x04 && raw[i + 1] === 0x20) {
+      const seed = raw.slice(i + 2, i + 34);
+      return nacl.sign.keyPair.fromSeed(seed).secretKey;
+    }
+  }
+
+  throw new Error(`Unsupported private key format (${raw.length} bytes)`);
+}
+
 // Fetch SOL balance from Solana RPC
 async function getSolBalance(publicKey: string): Promise<number> {
   try {

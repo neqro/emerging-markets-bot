@@ -429,7 +429,7 @@ serve(async (req) => {
 
         // Build transaction manually (SystemProgram.transfer)
         const fromPubkey = base58Decode(wallet.public_key);
-        const toPubkey = base58Decode(destinationAddress);
+        const toPubkey = destinationPubkeyBytes;
         const lamports = Math.floor(amountSol * 1e9);
 
         // System Program ID (all zeros)

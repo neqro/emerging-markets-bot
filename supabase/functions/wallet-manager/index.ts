@@ -313,9 +313,15 @@ serve(async (req) => {
     if (action === 'withdraw') {
       const { destinationAddress, amountSol } = body;
 
+      if (!destinationAddress || !amountSol || amountSol <= 0) {
+        return new Response(JSON.stringify({ error: 'Invalid parameters' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       const { data: wallet } = await supabase
         .from('user_wallets')
-        .select('id, public_key, sol_balance')
+        .select('id, public_key, sol_balance, encrypted_private_key')
         .eq('user_id', user.id)
         .single();
 
@@ -325,36 +331,198 @@ serve(async (req) => {
         });
       }
 
-      if (wallet.sol_balance < amountSol) {
-        return new Response(JSON.stringify({ error: 'Insufficient balance' }), {
+      // Check live balance
+      const liveBalance = await getSolBalance(wallet.public_key);
+      const fee = 0.000005; // ~5000 lamports tx fee
+      if (liveBalance < amountSol + fee) {
+        return new Response(JSON.stringify({ error: `Yetersiz bakiye. Mevcut: ${liveBalance.toFixed(6)} SOL` }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // Record withdrawal as trade order
-      const { data: trade, error } = await supabase
-        .from('trade_orders')
-        .insert({
+      // Decrypt private key
+      let secretKey: Uint8Array;
+      try {
+        secretKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
+        // Validate: must be 64 bytes for Ed25519 (nacl sign keypair)
+        if (secretKey.length !== 64) {
+          throw new Error(`Invalid key length: ${secretKey.length}, expected 64`);
+        }
+        // Verify the public key matches
+        const derivedPubKey = secretKey.slice(32);
+        const storedPubKeyBytes = base58Decode(wallet.public_key);
+        const pubKeysMatch = derivedPubKey.every((b, i) => b === storedPubKeyBytes[i]);
+        if (!pubKeysMatch) {
+          throw new Error('Decrypted key does not match wallet public key');
+        }
+      } catch (e) {
+        console.error('Key decryption error:', e);
+        return new Response(JSON.stringify({ error: 'Private key formatı hatalı. Lütfen yeni cüzdan oluşturun.' }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Build a raw SOL transfer transaction
+      try {
+        const HELIUS_API_KEY = Deno.env.get('HELIUS_API_KEY');
+        const rpcUrl = HELIUS_API_KEY 
+          ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
+          : 'https://api.mainnet-beta.solana.com';
+
+        // Get recent blockhash
+        const bhRes = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1,
+            method: 'getLatestBlockhash',
+            params: [{ commitment: 'finalized' }],
+          }),
+        });
+        const bhData = await bhRes.json();
+        if (bhData.error) throw new Error(bhData.error.message);
+        const blockhash = bhData.result.value.blockhash;
+
+        // Build transaction manually (SystemProgram.transfer)
+        const fromPubkey = base58Decode(wallet.public_key);
+        const toPubkey = base58Decode(destinationAddress);
+        const lamports = Math.floor(amountSol * 1e9);
+
+        // System Program ID (all zeros)
+        const systemProgramId = new Uint8Array(32);
+
+        // Compact array helper
+        function encodeCompactU16(value: number): Uint8Array {
+          if (value < 128) return new Uint8Array([value]);
+          if (value < 16384) return new Uint8Array([value & 0x7f | 0x80, value >> 7]);
+          return new Uint8Array([value & 0x7f | 0x80, (value >> 7) & 0x7f | 0x80, value >> 14]);
+        }
+
+        // Encode u64 little-endian
+        function encodeU64LE(value: number): Uint8Array {
+          const buf = new Uint8Array(8);
+          const lo = value & 0xffffffff;
+          const hi = Math.floor(value / 0x100000000) & 0xffffffff;
+          buf[0] = lo & 0xff; buf[1] = (lo >> 8) & 0xff;
+          buf[2] = (lo >> 16) & 0xff; buf[3] = (lo >> 24) & 0xff;
+          buf[4] = hi & 0xff; buf[5] = (hi >> 8) & 0xff;
+          buf[6] = (hi >> 16) & 0xff; buf[7] = (hi >> 24) & 0xff;
+          return buf;
+        }
+
+        // Instruction data: transfer = index 2, then u64 lamports
+        const instructionData = new Uint8Array(12);
+        instructionData.set(new Uint8Array([2, 0, 0, 0]), 0); // u32 instruction index = 2
+        instructionData.set(encodeU64LE(lamports), 4);
+
+        // Message header: 1 signer, 0 readonly-signed, 1 readonly-unsigned (system program)
+        const header = new Uint8Array([1, 0, 1]);
+
+        // Account keys: [from, to, system_program]
+        const accountKeys = new Uint8Array(96);
+        accountKeys.set(fromPubkey, 0);
+        accountKeys.set(toPubkey, 32);
+        accountKeys.set(systemProgramId, 64);
+
+        // Blockhash bytes
+        const blockhashBytes = base58Decode(blockhash);
+
+        // Instructions: 1 instruction
+        // program_id_index = 2 (system program), accounts = [0, 1], data = instructionData
+        const instructionAccountIndices = new Uint8Array([0, 1]);
+
+        // Build message
+        const numKeys = encodeCompactU16(3);
+        const numInstructions = encodeCompactU16(1);
+        const instrAcctsLen = encodeCompactU16(2);
+        const instrDataLen = encodeCompactU16(instructionData.length);
+        const programIdIndex = new Uint8Array([2]);
+
+        const messageParts = [
+          header,
+          numKeys,
+          accountKeys,
+          blockhashBytes,
+          numInstructions,
+          programIdIndex,
+          instrAcctsLen,
+          instructionAccountIndices,
+          instrDataLen,
+          instructionData,
+        ];
+
+        const messageLength = messageParts.reduce((sum, p) => sum + p.length, 0);
+        const message = new Uint8Array(messageLength);
+        let offset = 0;
+        for (const part of messageParts) {
+          message.set(part, offset);
+          offset += part.length;
+        }
+
+        // Sign with nacl
+        const signature = nacl.sign.detached(message, secretKey);
+
+        // Build full transaction: signatures count + signature + message
+        const sigCount = encodeCompactU16(1);
+        const txParts = [sigCount, signature, message];
+        const txLength = txParts.reduce((sum, p) => sum + p.length, 0);
+        const transaction = new Uint8Array(txLength);
+        offset = 0;
+        for (const part of txParts) {
+          transaction.set(part, offset);
+          offset += part.length;
+        }
+
+        // Send transaction
+        const txBase64 = base64Encode(transaction);
+        const sendRes = await fetch(rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1,
+            method: 'sendTransaction',
+            params: [txBase64, { encoding: 'base64', skipPreflight: false }],
+          }),
+        });
+        const sendData = await sendRes.json();
+
+        if (sendData.error) {
+          throw new Error(sendData.error.message || JSON.stringify(sendData.error));
+        }
+
+        const txSignature = sendData.result;
+        console.log(`✅ Withdraw tx sent: ${txSignature}`);
+
+        // Update balance
+        const newBalance = Math.max(0, liveBalance - amountSol - fee);
+        await supabase.from('user_wallets').update({ sol_balance: newBalance }).eq('id', wallet.id);
+
+        // Record successful trade
+        await supabase.from('trade_orders').insert({
           user_id: user.id,
           wallet_id: wallet.id,
           token_address: destinationAddress,
           token_symbol: 'SOL',
           order_type: 'withdraw',
           amount_sol: amountSol,
-          status: 'pending',
-        })
-        .select()
-        .single();
+          status: 'completed',
+          tx_signature: txSignature,
+        });
 
-      if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
+        return new Response(JSON.stringify({
+          success: true,
+          message: `${amountSol} SOL gönderildi!`,
+          txSignature,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+      } catch (txErr) {
+        console.error('Withdraw tx error:', txErr);
+        return new Response(JSON.stringify({ 
+          error: `İşlem başarısız: ${txErr instanceof Error ? txErr.message : String(txErr)}` 
+        }), {
           status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-
-      return new Response(JSON.stringify({ success: true, trade }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
     }
 
     // ===== GET TRADE HISTORY =====

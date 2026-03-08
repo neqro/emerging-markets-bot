@@ -26,6 +26,15 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+const FarcasterReady = () => {
+  useEffect(() => {
+    import("@farcaster/miniapp-sdk").then(({ sdk }) => {
+      sdk.actions.ready().catch(() => {});
+    }).catch(() => {});
+  }, []);
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>

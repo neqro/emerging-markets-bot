@@ -14,7 +14,176 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      bot_signals: {
+        Row: {
+          bot_activity_score: number | null
+          confidence_score: number | null
+          created_at: string
+          id: string
+          is_active: boolean | null
+          liquidity_usd: number | null
+          reason: string | null
+          signal_type: string
+          token_address: string
+          token_symbol: string | null
+          updated_at: string
+          volume_24h: number | null
+          whale_wallets_buying: number | null
+        }
+        Insert: {
+          bot_activity_score?: number | null
+          confidence_score?: number | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          liquidity_usd?: number | null
+          reason?: string | null
+          signal_type: string
+          token_address: string
+          token_symbol?: string | null
+          updated_at?: string
+          volume_24h?: number | null
+          whale_wallets_buying?: number | null
+        }
+        Update: {
+          bot_activity_score?: number | null
+          confidence_score?: number | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          liquidity_usd?: number | null
+          reason?: string | null
+          signal_type?: string
+          token_address?: string
+          token_symbol?: string | null
+          updated_at?: string
+          volume_24h?: number | null
+          whale_wallets_buying?: number | null
+        }
+        Relationships: []
+      }
+      token_analysis: {
+        Row: {
+          analyzed_at: string
+          bot_transaction_percentage: number | null
+          holder_count: number | null
+          id: string
+          is_honeypot: boolean | null
+          risk_score: number | null
+          token_address: string
+          token_symbol: string | null
+          top_10_holder_percentage: number | null
+        }
+        Insert: {
+          analyzed_at?: string
+          bot_transaction_percentage?: number | null
+          holder_count?: number | null
+          id?: string
+          is_honeypot?: boolean | null
+          risk_score?: number | null
+          token_address: string
+          token_symbol?: string | null
+          top_10_holder_percentage?: number | null
+        }
+        Update: {
+          analyzed_at?: string
+          bot_transaction_percentage?: number | null
+          holder_count?: number | null
+          id?: string
+          is_honeypot?: boolean | null
+          risk_score?: number | null
+          token_address?: string
+          token_symbol?: string | null
+          top_10_holder_percentage?: number | null
+        }
+        Relationships: []
+      }
+      tracked_wallets: {
+        Row: {
+          address: string
+          created_at: string
+          id: string
+          is_whale: boolean | null
+          label: string | null
+          total_profit_usd: number | null
+          total_trades: number | null
+          updated_at: string
+          win_rate: number | null
+        }
+        Insert: {
+          address: string
+          created_at?: string
+          id?: string
+          is_whale?: boolean | null
+          label?: string | null
+          total_profit_usd?: number | null
+          total_trades?: number | null
+          updated_at?: string
+          win_rate?: number | null
+        }
+        Update: {
+          address?: string
+          created_at?: string
+          id?: string
+          is_whale?: boolean | null
+          label?: string | null
+          total_profit_usd?: number | null
+          total_trades?: number | null
+          updated_at?: string
+          win_rate?: number | null
+        }
+        Relationships: []
+      }
+      wallet_transactions: {
+        Row: {
+          amount_sol: number | null
+          amount_usd: number | null
+          block_time: string | null
+          created_at: string
+          id: string
+          price_at_trade: number | null
+          signature: string | null
+          token_address: string
+          token_symbol: string | null
+          transaction_type: string
+          wallet_id: string | null
+        }
+        Insert: {
+          amount_sol?: number | null
+          amount_usd?: number | null
+          block_time?: string | null
+          created_at?: string
+          id?: string
+          price_at_trade?: number | null
+          signature?: string | null
+          token_address: string
+          token_symbol?: string | null
+          transaction_type: string
+          wallet_id?: string | null
+        }
+        Update: {
+          amount_sol?: number | null
+          amount_usd?: number | null
+          block_time?: string | null
+          created_at?: string
+          id?: string
+          price_at_trade?: number | null
+          signature?: string | null
+          token_address?: string
+          token_symbol?: string | null
+          transaction_type?: string
+          wallet_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_transactions_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "tracked_wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

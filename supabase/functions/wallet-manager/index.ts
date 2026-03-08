@@ -29,17 +29,17 @@ function decryptKey(encryptedBase64: string, secret: string): Uint8Array {
 
 // Generate Solana keypair using Ed25519
 async function generateSolanaKeypair(): Promise<{ publicKey: string; secretKey: Uint8Array }> {
-  const keyPair = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
+  const keyPair = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]) as CryptoKeyPair;
   
   const publicKeyRaw = await crypto.subtle.exportKey("raw", keyPair.publicKey);
   const privateKeyPkcs8 = await crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
   
   // Solana uses base58 for public keys
-  const publicKeyBytes = new Uint8Array(publicKeyRaw);
+  const publicKeyBytes = new Uint8Array(publicKeyRaw as ArrayBuffer);
   const publicKeyBase58 = base58Encode(publicKeyBytes);
   
   // Store the full PKCS8 private key
-  const secretKeyBytes = new Uint8Array(privateKeyPkcs8);
+  const secretKeyBytes = new Uint8Array(privateKeyPkcs8 as ArrayBuffer);
   
   return { publicKey: publicKeyBase58, secretKey: secretKeyBytes };
 }

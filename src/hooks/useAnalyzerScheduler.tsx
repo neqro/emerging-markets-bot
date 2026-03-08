@@ -12,7 +12,7 @@ export const useAnalyzerScheduler = () => {
     if (!session?.access_token) return;
     const now = Date.now();
     // Prevent double-runs within 60s
-    if (now - lastRunRef.current < 60000) return;
+    if (now - lastRunRef.current < 25000) return;
     lastRunRef.current = now;
 
     try {

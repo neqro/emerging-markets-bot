@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -25,11 +26,21 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
+const FarcasterReady = () => {
+  useEffect(() => {
+    import("@farcaster/miniapp-sdk").then(({ sdk }) => {
+      sdk.actions.ready().catch(() => {});
+    }).catch(() => {});
+  }, []);
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <LanguageProvider>
         <TooltipProvider>
+          <FarcasterReady />
           <Toaster />
           <Sonner />
           <BrowserRouter>

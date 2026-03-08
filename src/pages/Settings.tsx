@@ -1,4 +1,4 @@
-import { ArrowLeft, Sun, Moon, Palette, Monitor } from "lucide-react";
+import { ArrowLeft, Sun, Moon, Palette, Monitor, Shield, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useTheme, themePresets, ThemePreset } from "@/hooks/useTheme";

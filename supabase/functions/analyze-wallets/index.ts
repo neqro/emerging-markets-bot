@@ -572,7 +572,7 @@ serve(async (req) => {
                 continue;
               }
 
-              // Kullanıcının cüzdanını al
+              // Kullanıcının cüzdanını al + secret key decrypt
               const { data: wallet } = await supabase
                 .from('user_wallets')
                 .select('*')
@@ -581,6 +581,17 @@ serve(async (req) => {
 
               if (!wallet || wallet.sol_balance < 0.01) {
                 console.log(`⏸️ ${settings.user_id.slice(0, 8)}: Yetersiz bakiye (${wallet?.sol_balance || 0} SOL)`);
+                continue;
+              }
+
+              // Decrypt secret key for signing
+              const encryptionSecret = Deno.env.get('WALLET_ENCRYPTION_KEY') || supabaseKey.slice(0, 32);
+              let walletSecretKey: Uint8Array;
+              try {
+                const rawKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
+                walletSecretKey = normalizeSecretKey(rawKey);
+              } catch (keyErr) {
+                console.error(`❌ ${settings.user_id.slice(0, 8)}: Key decrypt hata:`, keyErr);
                 continue;
               }
 

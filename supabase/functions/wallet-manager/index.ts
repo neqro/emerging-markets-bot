@@ -354,6 +354,19 @@ serve(async (req) => {
         });
       }
 
+      // Validate destination address (must be valid 32-byte Solana public key)
+      let destinationPubkeyBytes: Uint8Array;
+      try {
+        destinationPubkeyBytes = base58Decode(destinationAddress);
+        if (destinationPubkeyBytes.length !== 32) {
+          throw new Error(`Invalid destination length: ${destinationPubkeyBytes.length}`);
+        }
+      } catch {
+        return new Response(JSON.stringify({ error: 'Geçersiz Solana adresi' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
       const { data: wallet } = await supabase
         .from('user_wallets')
         .select('id, public_key, sol_balance, encrypted_private_key')

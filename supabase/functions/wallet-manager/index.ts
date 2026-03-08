@@ -183,23 +183,11 @@ serve(async (req) => {
         });
       }
 
-      // Generate Ed25519 keypair using Web Crypto
-      const keyPair = await crypto.subtle.generateKey(
-        { name: 'Ed25519' },
-        true,
-        ['sign', 'verify']
-      );
-
-      const privateKeyRaw = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.privateKey));
-      const publicKeyRaw = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.publicKey));
-
-      // Solana keypair is 64 bytes: private (32) + public (32)
-      const fullKeypair = new Uint8Array(64);
-      fullKeypair.set(privateKeyRaw, 0);
-      fullKeypair.set(publicKeyRaw, 32);
-
-      const publicKeyBase58 = base58Encode(publicKeyRaw);
-      const encryptedKey = encryptKey(fullKeypair, encryptionSecret);
+      // Generate Solana keypair using tweetnacl
+      const keyPair = nacl.sign.keyPair();
+      // keyPair.secretKey is 64 bytes (seed 32 + public 32) - this is what Solana wallets expect
+      const publicKeyBase58 = base58Encode(keyPair.publicKey);
+      const encryptedKey = encryptKey(keyPair.secretKey, encryptionSecret);
 
       const { data: wallet, error } = await supabase
         .from('user_wallets')

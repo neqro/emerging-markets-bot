@@ -333,7 +333,8 @@ serve(async (req) => {
             reason = `👁️ İzleniyor | Risk: ${riskScore.toFixed(0)}% | Liq: $${(liquidity / 1000).toFixed(1)}K | Vol: $${(volume24h / 1000).toFixed(1)}K`;
           }
 
-          if (signalType) {
+          // Her token için sinyal kaydet
+          {
             // Aynı token için aktif sinyal varsa güncelle
             await supabase
               .from('bot_signals')

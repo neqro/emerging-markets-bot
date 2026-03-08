@@ -133,6 +133,24 @@ const Settings = () => {
             </Button>
           </div>
         </section>
+
+        {/* Security Link */}
+        <section className="space-y-3">
+          <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" />
+            Güvenlik
+          </h2>
+          <button
+            onClick={() => navigate("/security")}
+            className="w-full flex items-center justify-between rounded-lg bg-card border border-border p-3 text-xs font-mono text-foreground hover:border-primary/50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-muted-foreground" />
+              <span>2FA, Şifre, Oturumlar, Giriş Geçmişi</span>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </section>
       </div>
     </div>
   );

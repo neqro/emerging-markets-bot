@@ -74,7 +74,7 @@ export const StatsBar = () => {
   });
 
   return (
-    <div className="grid grid-cols-5 gap-3 px-6 py-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 md:gap-3 px-4 md:px-6 py-3 md:py-4">
       <StatItem
         icon={<Target className="h-4 w-4" />}
         label="Tokens Analyzed"

@@ -9,29 +9,29 @@ interface HeaderProps {
 
 export const Header = ({ searchQuery, onSearchChange }: HeaderProps) => {
   return (
-    <header className="flex items-center justify-between px-6 py-4 border-b border-border">
-      <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center h-9 w-9 rounded-lg bg-primary/10 glow-primary">
-          <Bot className="h-5 w-5 text-primary" />
+    <header className="flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-border">
+      <div className="flex items-center gap-2 md:gap-3">
+        <div className="flex items-center justify-center h-8 w-8 md:h-9 md:w-9 rounded-lg bg-primary/10 glow-primary">
+          <Bot className="h-4 w-4 md:h-5 md:w-5 text-primary" />
         </div>
         <div>
-          <h1 className="text-lg font-display font-bold tracking-tight text-foreground">
+          <h1 className="text-base md:text-lg font-display font-bold tracking-tight text-foreground">
             SolBot
           </h1>
-          <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+          <p className="text-[9px] md:text-[10px] text-muted-foreground uppercase tracking-widest hidden sm:block">
             Autonomous Trading Terminal
           </p>
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="relative">
+      <div className="flex items-center gap-2 md:gap-3">
+        <div className="relative hidden sm:block">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search tokens..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="pl-9 w-64 h-8 text-xs bg-secondary border-border"
+            className="pl-9 w-40 md:w-64 h-8 text-xs bg-secondary border-border"
           />
         </div>
         <Button variant="ghost" size="icon" className="h-8 w-8">

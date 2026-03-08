@@ -5,6 +5,7 @@ import { PanelHeader } from "./PanelHeader";
 import { useWallet } from "@/hooks/useWallet";
 import { useAuth } from "@/hooks/useAuth";
 import { TradeDialog } from "./TradeDialog";
+import { AutoTradeSettings } from "./AutoTradeSettings";
 import { toast } from "@/components/ui/sonner";
 
 export const WalletPanel = () => {

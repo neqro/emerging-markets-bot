@@ -1,13 +1,15 @@
-import { Eye, Wallet, Loader2 } from "lucide-react";
+import { Eye, Wallet, Loader2, Star } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { PanelHeader } from "./PanelHeader";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { timeAgo } from "@/lib/dexscreener";
+import { useFavorites } from "@/hooks/useFavorites";
 
 export const WalletTrackerPanel = () => {
   const queryClient = useQueryClient();
+  const { isFavorite, toggleFavorite } = useFavorites();
 
   const { data: wallets, isLoading: walletsLoading } = useQuery({
     queryKey: ["tracked-wallets"],
@@ -37,22 +39,13 @@ export const WalletTrackerPanel = () => {
     refetchInterval: 15000,
   });
 
-  // Realtime subscriptions
   useEffect(() => {
     const channel = supabase
       .channel("wallet-tracker-realtime")
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "wallet_transactions",
-      }, () => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "wallet_transactions" }, () => {
         queryClient.invalidateQueries({ queryKey: ["wallet-transactions"] });
       })
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "tracked_wallets",
-      }, () => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "tracked_wallets" }, () => {
         queryClient.invalidateQueries({ queryKey: ["tracked-wallets"] });
       })
       .subscribe();
@@ -76,6 +69,7 @@ export const WalletTrackerPanel = () => {
               const walletAddr = (tx.tracked_wallets as any)?.address || "";
               const walletLabel = (tx.tracked_wallets as any)?.label;
               const shortWallet = walletLabel || `${walletAddr.slice(0, 4)}...${walletAddr.slice(-4)}`;
+              const isFav = walletAddr ? isFavorite("wallet", walletAddr) : false;
 
               return (
                 <div
@@ -83,10 +77,16 @@ export const WalletTrackerPanel = () => {
                   className="flex items-center justify-between p-2 rounded-md bg-secondary/30 hover:bg-secondary/60 transition-colors animate-slide-up"
                 >
                   <div className="flex items-center gap-2">
+                    {walletAddr && (
+                      <button
+                        onClick={() => toggleFavorite("wallet", walletAddr, walletLabel || shortWallet)}
+                        className={`transition-colors ${isFav ? "text-primary" : "text-muted-foreground/30 hover:text-primary/60"}`}
+                      >
+                        <Star className={`h-3 w-3 ${isFav ? "fill-primary" : ""}`} />
+                      </button>
+                    )}
                     <Wallet className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-[11px] font-mono text-muted-foreground">
-                      {shortWallet}
-                    </span>
+                    <span className="text-[11px] font-mono text-muted-foreground">{shortWallet}</span>
                     <span
                       className={`text-[10px] font-display font-semibold uppercase px-1.5 py-0.5 rounded ${
                         tx.transaction_type === "buy"

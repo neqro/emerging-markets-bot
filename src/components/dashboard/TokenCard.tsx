@@ -1,7 +1,8 @@
-import { ExternalLink, TrendingDown, TrendingUp, ShieldAlert, ShieldCheck, Shield } from "lucide-react";
+import { ExternalLink, TrendingDown, TrendingUp, ShieldAlert, ShieldCheck, Shield, Star } from "lucide-react";
 import { type TokenPair, formatUsd, formatNumber, timeAgo } from "@/lib/dexscreener";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useFavorites } from "@/hooks/useFavorites";
 
 interface TokenCardProps {
   pair: TokenPair;
@@ -10,6 +11,8 @@ interface TokenCardProps {
 export const TokenCard = ({ pair }: TokenCardProps) => {
   const priceChange = pair.priceChange?.h1 ?? 0;
   const isUp = priceChange >= 0;
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const isFav = isFavorite("token", pair.baseToken.address);
 
   const { data: analysis } = useQuery({
     queryKey: ["token-risk", pair.baseToken.address],
@@ -45,11 +48,7 @@ export const TokenCard = ({ pair }: TokenCardProps) => {
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2">
           {pair.info?.imageUrl ? (
-            <img
-              src={pair.info.imageUrl}
-              alt={pair.baseToken.symbol}
-              className="h-7 w-7 rounded-full bg-muted"
-            />
+            <img src={pair.info.imageUrl} alt={pair.baseToken.symbol} className="h-7 w-7 rounded-full bg-muted" />
           ) : (
             <div className="h-7 w-7 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold text-primary">
               {pair.baseToken.symbol.slice(0, 2)}
@@ -57,31 +56,26 @@ export const TokenCard = ({ pair }: TokenCardProps) => {
           )}
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="text-sm font-display font-semibold text-foreground">
-                {pair.baseToken.symbol}
-              </span>
-              <span className="text-[10px] text-muted-foreground">
-                /{pair.quoteToken.symbol}
-              </span>
+              <span className="text-sm font-display font-semibold text-foreground">{pair.baseToken.symbol}</span>
+              <span className="text-[10px] text-muted-foreground">/{pair.quoteToken.symbol}</span>
             </div>
-            <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">
-              {pair.baseToken.name}
-            </p>
+            <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">{pair.baseToken.name}</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleFavorite("token", pair.baseToken.address, pair.baseToken.symbol); }}
+            className={`transition-colors ${isFav ? "text-primary" : "text-muted-foreground/40 hover:text-primary/60"}`}
+          >
+            <Star className={`h-3.5 w-3.5 ${isFav ? "fill-primary" : ""}`} />
+          </button>
           {risk && RiskIcon && (
             <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${risk.badge}`}>
               <RiskIcon className="h-3 w-3" />
               {risk.label} {riskScore?.toFixed(0)}
             </div>
           )}
-          <a
-            href={pair.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="opacity-0 group-hover:opacity-100 transition-opacity"
-          >
+          <a href={pair.url} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover:opacity-100 transition-opacity">
             <ExternalLink className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" />
           </a>
         </div>

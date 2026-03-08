@@ -17,27 +17,25 @@ export const useFarcaster = (): FarcasterContext => {
       try {
         const { sdk } = await import("@farcaster/miniapp-sdk");
         
-        // Check if running inside Farcaster
-        const isInFrame = window.self !== window.top || 
-          navigator.userAgent.includes("Farcaster") ||
-          new URLSearchParams(window.location.search).has("fc_frame");
+        // Always call ready() — Farcaster validator needs it
+        await sdk.actions.ready();
+        const context = await sdk.context;
         
-        if (isInFrame) {
-          await sdk.actions.ready();
-          const context = await sdk.context;
+        if (context?.user) {
           setState({
             isMiniApp: true,
             isReady: true,
-            user: context?.user ? {
+            user: {
               fid: context.user.fid,
               username: context.user.username,
               displayName: context.user.displayName,
-            } : undefined,
+            },
           });
         } else {
-          setState({ isMiniApp: false, isReady: true });
+          setState({ isMiniApp: true, isReady: true });
         }
       } catch {
+        // Not in Farcaster context
         setState({ isMiniApp: false, isReady: true });
       }
     };

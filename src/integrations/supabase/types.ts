@@ -134,6 +134,95 @@ export type Database = {
         }
         Relationships: []
       }
+      trade_orders: {
+        Row: {
+          amount_sol: number
+          amount_tokens: number | null
+          created_at: string
+          error_message: string | null
+          id: string
+          order_type: string
+          price_at_trade: number | null
+          status: string
+          token_address: string
+          token_symbol: string | null
+          tx_signature: string | null
+          updated_at: string
+          user_id: string
+          wallet_id: string
+        }
+        Insert: {
+          amount_sol: number
+          amount_tokens?: number | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          order_type: string
+          price_at_trade?: number | null
+          status?: string
+          token_address: string
+          token_symbol?: string | null
+          tx_signature?: string | null
+          updated_at?: string
+          user_id: string
+          wallet_id: string
+        }
+        Update: {
+          amount_sol?: number
+          amount_tokens?: number | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          order_type?: string
+          price_at_trade?: number | null
+          status?: string
+          token_address?: string
+          token_symbol?: string | null
+          tx_signature?: string | null
+          updated_at?: string
+          user_id?: string
+          wallet_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_orders_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "user_wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_wallets: {
+        Row: {
+          created_at: string
+          encrypted_private_key: string
+          id: string
+          public_key: string
+          sol_balance: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          encrypted_private_key: string
+          id?: string
+          public_key: string
+          sol_balance?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          encrypted_private_key?: string
+          id?: string
+          public_key?: string
+          sol_balance?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       wallet_transactions: {
         Row: {
           amount_sol: number | null

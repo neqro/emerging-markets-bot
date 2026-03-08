@@ -1,4 +1,4 @@
-import { ArrowLeft, Sun, Moon, Monitor, Palette, Shield, ChevronRight, Key, User, Globe, Camera } from "lucide-react";
+import { ArrowLeft, Sun, Moon, Monitor, Palette, Shield, ChevronRight, Key, User, Globe, Camera, Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,8 +7,10 @@ import { useTheme, themePresets, ThemePreset } from "@/hooks/useTheme";
 import { useLanguage, Language } from "@/hooks/useLanguage";
 import { useProfile } from "@/hooks/useProfile";
 import { useWallet } from "@/hooks/useWallet";
-import { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { useState, useEffect, useRef } from "react";
 import { ExportKeyDialog } from "@/components/dashboard/ExportKeyDialog";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/components/ui/sonner";
 
 const Settings = () => {
@@ -17,6 +19,7 @@ const Settings = () => {
   const { language, setLanguage, t } = useLanguage();
   const { profile, updateProfile } = useProfile();
   const { wallet } = useWallet();
+  const { user } = useAuth();
 
   const [customH, setCustomH] = useState("280");
   const [customS, setCustomS] = useState("72");
@@ -25,6 +28,8 @@ const Settings = () => {
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [exportKeyOpen, setExportKeyOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (profile) {
@@ -40,6 +45,43 @@ const Settings = () => {
   const handleSaveProfile = async () => {
     const { error } = await updateProfile({ username: username || null, avatar_url: avatarUrl || null }) || {};
     if (!error) toast.success(t("settings.profileSaved"));
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    const maxSize = 2 * 1024 * 1024; // 2MB
+    if (file.size > maxSize) {
+      toast.error("Max 2MB");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const ext = file.name.split(".").pop();
+      const filePath = `${user.id}/avatar.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("avatars")
+        .getPublicUrl(filePath);
+
+      // Append timestamp to bust cache
+      const url = `${publicUrl}?t=${Date.now()}`;
+      setAvatarUrl(url);
+      await updateProfile({ avatar_url: url });
+      toast.success(t("settings.avatarUploaded"));
+    } catch (e: any) {
+      toast.error(e.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const languages: { value: Language; label: string; flag: string }[] = [
@@ -68,13 +110,30 @@ const Settings = () => {
             <div className="flex items-center gap-3">
               <div className="relative">
                 {avatarUrl ? (
-                  <img src={avatarUrl} alt="Avatar" className="h-12 w-12 rounded-full object-cover border-2 border-primary/30" />
+                  <img src={avatarUrl} alt="Avatar" className="h-14 w-14 rounded-full object-cover border-2 border-primary/30" />
                 ) : (
-                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center border-2 border-primary/30">
-                    <User className="h-6 w-6 text-primary" />
+                  <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center border-2 border-primary/30">
+                    <User className="h-7 w-7 text-primary" />
                   </div>
                 )}
-                <Camera className="absolute -bottom-1 -right-1 h-4 w-4 text-muted-foreground" />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-primary flex items-center justify-center border-2 border-card hover:bg-primary/80 transition-colors"
+                >
+                  {uploading ? (
+                    <Loader2 className="h-3 w-3 animate-spin text-primary-foreground" />
+                  ) : (
+                    <Camera className="h-3 w-3 text-primary-foreground" />
+                  )}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handleAvatarUpload}
+                  className="hidden"
+                />
               </div>
               <div className="flex-1 space-y-2">
                 <div>
@@ -83,15 +142,6 @@ const Settings = () => {
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder={t("settings.usernamePlaceholder")}
-                    className="h-8 text-xs bg-secondary border-border"
-                  />
-                </div>
-                <div>
-                  <Label className="text-[10px] text-muted-foreground">{t("settings.avatar")}</Label>
-                  <Input
-                    value={avatarUrl}
-                    onChange={(e) => setAvatarUrl(e.target.value)}
-                    placeholder={t("settings.avatarDesc")}
                     className="h-8 text-xs bg-secondary border-border"
                   />
                 </div>
@@ -193,10 +243,7 @@ const Settings = () => {
           </h2>
           <div className="rounded-lg bg-card border border-border p-4 space-y-3">
             <div className="flex items-center gap-3">
-              <div
-                className="h-10 w-10 rounded-lg border border-border shrink-0"
-                style={{ background: `hsl(${customH}, ${customS}%, ${customL}%)` }}
-              />
+              <div className="h-10 w-10 rounded-lg border border-border shrink-0" style={{ background: `hsl(${customH}, ${customS}%, ${customL}%)` }} />
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2">
                   <Label className="text-[10px] text-muted-foreground w-6">H</Label>

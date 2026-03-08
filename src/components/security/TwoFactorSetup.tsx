@@ -5,8 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/components/ui/sonner";
+import { useLanguage } from "@/hooks/useLanguage";
 
 export const TwoFactorSetup = () => {
+  const { t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [factors, setFactors] = useState<any[]>([]);
   const [enrolling, setEnrolling] = useState(false);
@@ -43,7 +45,7 @@ export const TwoFactorSetup = () => {
       setSecret(data.totp.secret);
       setFactorId(data.id);
     } catch (e: any) {
-      toast.error(e.message || "2FA kurulumu başarısız");
+      toast.error(e.message || t("security.2faFailed"));
     } finally {
       setEnrolling(false);
     }
@@ -53,9 +55,7 @@ export const TwoFactorSetup = () => {
     if (!factorId || verifyCode.length !== 6) return;
     setVerifying(true);
     try {
-      const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({
-        factorId,
-      });
+      const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({ factorId });
       if (challengeError) throw challengeError;
 
       const { error: verifyError } = await supabase.auth.mfa.verify({
@@ -65,14 +65,14 @@ export const TwoFactorSetup = () => {
       });
       if (verifyError) throw verifyError;
 
-      toast.success("2FA başarıyla etkinleştirildi!");
+      toast.success(t("security.2faEnabled"));
       setQrCode(null);
       setSecret(null);
       setFactorId(null);
       setVerifyCode("");
       await loadFactors();
     } catch (e: any) {
-      toast.error(e.message || "Doğrulama başarısız. Kodu kontrol edin.");
+      toast.error(e.message || t("security.2faVerifyFailed"));
     } finally {
       setVerifying(false);
     }
@@ -82,10 +82,10 @@ export const TwoFactorSetup = () => {
     try {
       const { error } = await supabase.auth.mfa.unenroll({ factorId: fId });
       if (error) throw error;
-      toast.success("2FA devre dışı bırakıldı");
+      toast.success(t("security.2faDisabled"));
       await loadFactors();
     } catch (e: any) {
-      toast.error(e.message || "2FA devre dışı bırakılamadı");
+      toast.error(e.message || t("security.2faFailed"));
     }
   };
 
@@ -103,55 +103,42 @@ export const TwoFactorSetup = () => {
     <section className="space-y-3">
       <h2 className="text-sm font-display font-semibold text-foreground flex items-center gap-2">
         <Smartphone className="h-4 w-4 text-primary" />
-        İki Faktörlü Doğrulama (2FA)
+        {t("security.2fa")}
       </h2>
 
       {verifiedFactors.length > 0 ? (
         <div className="rounded-lg bg-primary/10 border border-primary/30 p-3 space-y-2">
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-primary" />
-            <span className="text-xs font-mono text-primary">2FA Aktif</span>
+            <span className="text-xs font-mono text-primary">{t("security.2faActive")}</span>
           </div>
-          <p className="text-[10px] text-muted-foreground">
-            Google Authenticator ile korunuyor
-          </p>
+          <p className="text-[10px] text-muted-foreground">{t("security.2faProtected")}</p>
           {verifiedFactors.map((f) => (
             <div key={f.id} className="flex items-center justify-between">
-              <span className="text-[10px] text-muted-foreground font-mono">
-                {f.friendly_name || "TOTP"}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleUnenroll(f.id)}
-                className="h-6 text-[10px] text-destructive hover:text-destructive"
-              >
+              <span className="text-[10px] text-muted-foreground font-mono">{f.friendly_name || "TOTP"}</span>
+              <Button variant="ghost" size="sm" onClick={() => handleUnenroll(f.id)} className="h-6 text-[10px] text-destructive hover:text-destructive">
                 <X className="h-3 w-3 mr-1" />
-                Kaldır
+                {t("security.2faDisable")}
               </Button>
             </div>
           ))}
         </div>
       ) : qrCode ? (
         <div className="rounded-lg bg-card border border-border p-4 space-y-4">
-          <p className="text-xs text-muted-foreground">
-            Google Authenticator veya benzeri bir uygulama ile QR kodu tarayın:
-          </p>
+          <p className="text-xs text-muted-foreground">{t("security.2faScanQR")}</p>
           <div className="flex justify-center bg-secondary/50 rounded-lg p-4">
             <img src={qrCode} alt="TOTP QR Code" className="w-48 h-48" />
           </div>
           {secret && (
             <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Manuel giriş kodu:</Label>
-              <code className="block text-[10px] font-mono text-foreground bg-secondary/50 p-2 rounded break-all">
-                {secret}
-              </code>
+              <Label className="text-[10px] text-muted-foreground">{t("security.2faManualCode")}</Label>
+              <code className="block text-[10px] font-mono text-foreground bg-secondary/50 p-2 rounded break-all">{secret}</code>
             </div>
           )}
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Doğrulama Kodu</Label>
+            <Label className="text-xs text-muted-foreground">{t("security.2faVerifyCode")}</Label>
             <Input
-              placeholder="6 haneli kod girin"
+              placeholder={t("security.2faEnterCode")}
               value={verifyCode}
               onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               className="text-xs h-9 bg-secondary border-border font-mono tracking-widest text-center"
@@ -159,20 +146,12 @@ export const TwoFactorSetup = () => {
             />
           </div>
           <div className="flex gap-2">
-            <Button
-              onClick={handleVerify}
-              disabled={verifying || verifyCode.length !== 6}
-              className="flex-1 h-8 text-xs font-mono"
-            >
+            <Button onClick={handleVerify} disabled={verifying || verifyCode.length !== 6} className="flex-1 h-8 text-xs font-mono">
               {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3 mr-1" />}
-              Doğrula ve Etkinleştir
+              {t("security.2faVerifyAndEnable")}
             </Button>
-            <Button
-              variant="ghost"
-              onClick={() => { setQrCode(null); setSecret(null); setFactorId(null); }}
-              className="h-8 text-xs"
-            >
-              İptal
+            <Button variant="ghost" onClick={() => { setQrCode(null); setSecret(null); setFactorId(null); }} className="h-8 text-xs">
+              {t("common.cancel")}
             </Button>
           </div>
         </div>
@@ -180,19 +159,12 @@ export const TwoFactorSetup = () => {
         <div className="rounded-lg bg-card border border-border p-3 space-y-3">
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">2FA henüz etkin değil</span>
+            <span className="text-xs text-muted-foreground">{t("security.2faNotActive")}</span>
           </div>
-          <p className="text-[10px] text-muted-foreground">
-            Google Authenticator ile hesabınızı ekstra koruma altına alın.
-          </p>
-          <Button
-            onClick={handleEnroll}
-            disabled={enrolling}
-            size="sm"
-            className="h-8 text-xs font-mono"
-          >
+          <p className="text-[10px] text-muted-foreground">{t("security.2faDesc")}</p>
+          <Button onClick={handleEnroll} disabled={enrolling} size="sm" className="h-8 text-xs font-mono">
             {enrolling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <QrCode className="h-3 w-3 mr-1" />}
-            2FA Etkinleştir
+            {t("security.2faEnable")}
           </Button>
         </div>
       )}

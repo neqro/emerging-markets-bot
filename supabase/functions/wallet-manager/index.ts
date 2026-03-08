@@ -375,23 +375,19 @@ serve(async (req) => {
         });
       }
 
-      // Decrypt private key
+      // Decrypt private key (supports legacy formats)
       let secretKey: Uint8Array;
       try {
-        secretKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
-        // Validate: must be 64 bytes for Ed25519 (nacl sign keypair)
-        if (secretKey.length !== 64) {
-          throw new Error(`Invalid key length: ${secretKey.length}, expected 64`);
-        }
+        const rawKey = decryptKey(wallet.encrypted_private_key, encryptionSecret);
+        secretKey = normalizeSecretKey(rawKey);
+
         // Verify the public key matches
-        const derivedPubKey = secretKey.slice(32);
-        const storedPubKeyBytes = base58Decode(wallet.public_key);
-        const pubKeysMatch = derivedPubKey.every((b, i) => b === storedPubKeyBytes[i]);
-        if (!pubKeysMatch) {
+        const derivedPubKeyBase58 = base58Encode(secretKey.slice(32));
+        if (derivedPubKeyBase58 !== wallet.public_key) {
           throw new Error('Decrypted key does not match wallet public key');
         }
       } catch (e) {
-        console.error('Key decryption error:', e);
+        console.error('Key decryption/normalization error:', e);
         return new Response(JSON.stringify({ error: 'Private key formatı hatalı. Lütfen yeni cüzdan oluşturun.' }), {
           status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });

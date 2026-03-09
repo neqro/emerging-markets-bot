@@ -48,16 +48,28 @@ async function executeJupiterSwap(
   slippageBps: number = 300,
 ): Promise<{ success: boolean; txSignature?: string; outAmount?: number; error?: string }> {
   try {
-    // 1. Get quote from Jupiter (new API endpoint)
-    const quoteUrl = `https://api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=${slippageBps}`;
+    // 1. Get quote from Jupiter (use lite-api to avoid quote-api DNS issues)
+    const jupBase = 'https://lite-api.jup.ag/swap/v1';
+    const quoteUrl = `${jupBase}/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amountLamports}&slippageBps=${slippageBps}`;
     console.log(`📡 Jupiter quote: ${inputMint.slice(0, 8)}→${outputMint.slice(0, 8)} | ${amountLamports} lamports`);
-    
+
     const quoteRes = await fetch(quoteUrl);
-    const quote = await quoteRes.json();
-    if (quote.error) return { success: false, error: `Quote error: ${quote.error}` };
+    const quoteText = await quoteRes.text();
+    if (!quoteRes.ok) {
+      return { success: false, error: `Quote HTTP ${quoteRes.status}: ${quoteText.slice(0, 300)}` };
+    }
+
+    let quote: any;
+    try {
+      quote = JSON.parse(quoteText);
+    } catch {
+      return { success: false, error: `Quote parse error: ${quoteText.slice(0, 300)}` };
+    }
+
+    if (quote?.error) return { success: false, error: `Quote error: ${quote.error}` };
 
     // 2. Get swap transaction
-    const swapRes = await fetch('https://api.jup.ag/swap/v1/swap', {
+    const swapRes = await fetch(`${jupBase}/swap`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -68,8 +80,19 @@ async function executeJupiterSwap(
         prioritizationFeeLamports: 'auto',
       }),
     });
-    const swapData = await swapRes.json();
-    if (swapData.error) return { success: false, error: `Swap error: ${swapData.error}` };
+    const swapText = await swapRes.text();
+    if (!swapRes.ok) {
+      return { success: false, error: `Swap HTTP ${swapRes.status}: ${swapText.slice(0, 300)}` };
+    }
+
+    let swapData: any;
+    try {
+      swapData = JSON.parse(swapText);
+    } catch {
+      return { success: false, error: `Swap parse error: ${swapText.slice(0, 300)}` };
+    }
+
+    if (swapData?.error) return { success: false, error: `Swap error: ${swapData.error}` };
 
     // 3. Deserialize, sign and send
     const txBytes = base64Decode(swapData.swapTransaction);
@@ -660,7 +683,6 @@ serve(async (req) => {
                     autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'failed', error: buyResult.error });
                     console.error(`❌ AUTO BUY hata: ${signal.token_symbol}: ${buyResult.error}`);
                   }
-                  }
                 }
 
                 // === AUTO SELL ===
@@ -688,8 +710,12 @@ serve(async (req) => {
                   const amountLamports = Math.floor(sellAmount * 1e9);
 
                   const sellResult = await executeJupiterSwap(
-                    signal.token_address, SOL_MINT, amountLamports,
-                    walletSecretKey, wallet.public_key, 500
+                    signal.token_address,
+                    SOL_MINT,
+                    amountLamports,
+                    walletSecretKey,
+                    wallet.public_key,
+                    500,
                   );
 
                   if (sellResult.success && sellResult.txSignature) {

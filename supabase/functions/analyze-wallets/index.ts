@@ -683,10 +683,10 @@ serve(async (req) => {
                     autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'buy', token: signal.token_symbol, amount: tradeAmount, status: 'failed', error: buyResult.error });
                     console.error(`❌ AUTO BUY hata: ${signal.token_symbol}: ${buyResult.error}`);
                   }
-                  }
                 }
+              }
 
-                // === AUTO SELL ===
+              // === AUTO SELL ===
                 if (signal.signal_type === 'sell' && settings.auto_sell_enabled) {
                   if (signal.confidence_score < settings.min_confidence_sell) continue;
                   if (!openTokens.has(signal.token_address)) continue; // Pozisyon yoksa satma

@@ -632,9 +632,24 @@ serve(async (req) => {
                 // Günlük limit kontrolü (her trade sonrası)
                 if (settings.daily_sol_used >= settings.max_daily_sol) break;
 
+                // === SİNYAL GÜVENLİK KAPISI (rug/honeypot riskini azaltmak için) ===
+                const signalAgeMs = Date.now() - new Date(signal.created_at).getTime();
+                const MAX_SIGNAL_AGE_MS = 2 * 60 * 1000; // 2 dakika
+
+                // Çok düşük likidite / hacim token'lar “2 dk sonra sıfır” riskini ciddi artırır
+                const MIN_TRADE_LIQ_USD = 20_000;
+                const MIN_TRADE_VOL_24H_USD = 75_000;
+                const MAX_BOT_SCORE = 55;
+
                 // === AUTO BUY ===
                 if (signal.signal_type === 'buy' && settings.auto_buy_enabled) {
                   if (signal.confidence_score < settings.min_confidence_buy) continue;
+                  if (signalAgeMs > MAX_SIGNAL_AGE_MS) continue; // bayat sinyal
+                  if ((signal.liquidity_usd ?? 0) < MIN_TRADE_LIQ_USD) continue;
+                  if ((signal.volume_24h ?? 0) < MIN_TRADE_VOL_24H_USD) continue;
+                  if ((signal.bot_activity_score ?? 0) > MAX_BOT_SCORE) continue;
+                  if ((signal.whale_wallets_buying ?? 0) < 1 && (signal.confidence_score ?? 0) < 75) continue;
+
                   if (openTokens.size >= settings.max_open_positions) continue;
                   if (openTokens.has(signal.token_address)) continue; // Zaten pozisyon var
                   if (wallet.sol_balance < settings.max_sol_per_trade) continue;
@@ -666,10 +681,17 @@ serve(async (req) => {
                       token_symbol: signal.token_symbol,
                       order_type: 'buy',
                       amount_sol: tradeAmount,
+                      amount_tokens: buyResult.outAmount ?? null, // Jupiter quote outAmount (token base units)
                       status: 'completed',
                       tx_signature: buyResult.txSignature,
-                      price_at_trade: buyResult.outAmount ? buyResult.outAmount / 1e6 : null,
+                      price_at_trade: null,
                     });
+
+                    // Bu sinyali tüket (tekrar tekrar aynı rug token'a girmesin)
+                    await supabase
+                      .from('bot_signals')
+                      .update({ is_active: false })
+                      .eq('id', signal.id);
 
                     settings.daily_sol_used += tradeAmount;
                     wallet.sol_balance -= tradeAmount;
@@ -690,10 +712,10 @@ serve(async (req) => {
                   if (signal.confidence_score < settings.min_confidence_sell) continue;
                   if (!openTokens.has(signal.token_address)) continue; // Pozisyon yoksa satma
 
-                  // Bu token'dan ne kadar aldığımızı bul
+                  // Bu token'dan ne kadar token aldığımızı bul (base units)
                   const { data: buyOrder } = await supabase
                     .from('trade_orders')
-                    .select('amount_sol')
+                    .select('amount_sol, amount_tokens')
                     .eq('user_id', settings.user_id)
                     .eq('token_address', signal.token_address)
                     .eq('order_type', 'buy')
@@ -702,40 +724,47 @@ serve(async (req) => {
                     .limit(1)
                     .single();
 
-                  const sellAmount = buyOrder?.amount_sol || settings.max_sol_per_trade;
+                  const tokenAmountBaseUnits = Number(buyOrder?.amount_tokens ?? 0);
+                  if (!tokenAmountBaseUnits || tokenAmountBaseUnits <= 0) {
+                    console.log(`⏭️ AUTO SELL atlandı: ${signal.token_symbol} (amount_tokens yok)`);
+                    continue;
+                  }
 
-                  console.log(`🔴 AUTO SELL: ${signal.token_symbol} | ~${sellAmount} SOL | Güven: ${signal.confidence_score}%`);
+                  console.log(`🔴 AUTO SELL: ${signal.token_symbol} | tokenUnits=${tokenAmountBaseUnits} | Güven: ${signal.confidence_score}%`);
 
                   const SOL_MINT = 'So11111111111111111111111111111111111111112';
-                  const amountLamports = Math.floor(sellAmount * 1e9);
 
+                  // Not: inputMint token olduğundan, amount burada token'ın base unit miktarı olmalı.
                   const sellResult = await executeJupiterSwap(
                     signal.token_address,
                     SOL_MINT,
-                    amountLamports,
+                    Math.floor(tokenAmountBaseUnits),
                     walletSecretKey,
                     wallet.public_key,
                     500,
                   );
 
                   if (sellResult.success && sellResult.txSignature) {
+                    const solReceived = sellResult.outAmount ? sellResult.outAmount / 1e9 : 0;
+
                     await supabase.from('trade_orders').insert({
                       user_id: settings.user_id,
                       wallet_id: wallet.id,
                       token_address: signal.token_address,
                       token_symbol: signal.token_symbol,
                       order_type: 'sell',
-                      amount_sol: sellAmount,
+                      amount_sol: solReceived || 0, // SOL received
+                      amount_tokens: tokenAmountBaseUnits,
                       status: 'completed',
                       tx_signature: sellResult.txSignature,
                     });
 
-                    wallet.sol_balance += sellAmount;
+                    wallet.sol_balance += solReceived;
                     await supabase.from('user_wallets').update({ sol_balance: wallet.sol_balance }).eq('id', wallet.id);
 
                     openTokens.delete(signal.token_address);
-                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, amount: sellAmount, status: 'completed' });
-                    console.log(`✅ AUTO SELL tamamlandı: ${signal.token_symbol} | tx: ${sellResult.txSignature}`);
+                    autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, amount: solReceived, status: 'completed' });
+                    console.log(`✅ AUTO SELL tamamlandı: ${signal.token_symbol} | out: ${solReceived.toFixed(4)} SOL | tx: ${sellResult.txSignature}`);
                   } else {
                     autoTradeResults.push({ user: settings.user_id.slice(0, 8), type: 'sell', token: signal.token_symbol, status: 'failed', error: sellResult.error });
                     console.error(`❌ AUTO SELL hata: ${signal.token_symbol}: ${sellResult.error}`);

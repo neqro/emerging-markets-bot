@@ -684,9 +684,8 @@ serve(async (req) => {
                     console.error(`❌ AUTO BUY hata: ${signal.token_symbol}: ${buyResult.error}`);
                   }
                 }
-              }
 
-              // === AUTO SELL ===
+                // === AUTO SELL ===
                 if (signal.signal_type === 'sell' && settings.auto_sell_enabled) {
                   if (signal.confidence_score < settings.min_confidence_sell) continue;
                   if (!openTokens.has(signal.token_address)) continue; // Pozisyon yoksa satma
@@ -711,8 +710,12 @@ serve(async (req) => {
                   const amountLamports = Math.floor(sellAmount * 1e9);
 
                   const sellResult = await executeJupiterSwap(
-                    signal.token_address, SOL_MINT, amountLamports,
-                    walletSecretKey, wallet.public_key, 500
+                    signal.token_address,
+                    SOL_MINT,
+                    amountLamports,
+                    walletSecretKey,
+                    wallet.public_key,
+                    500,
                   );
 
                   if (sellResult.success && sellResult.txSignature) {
